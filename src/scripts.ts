@@ -38,39 +38,39 @@ send({
  * The {code} placeholder will be replaced with actual JavaScript code
  */
 export const SCRIPT_EXECUTE_WRAPPER = `
-(function() {{
+(function() {
     var initialLogs = [];
     var originalLog = console.log;
     
     // Intercept console.log to capture output
-    console.log = function() {{
+    console.log = function() {
         var args = Array.prototype.slice.call(arguments);
-        var logMsg = args.map(function(arg) {{
+        var logMsg = args.map(function(arg) {
             return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
-        }}).join(' ');
+        }).join(' ');
         initialLogs.push(logMsg);
         originalLog.apply(console, arguments);
-    }};
+    };
     
     var scriptResult;
     var scriptError;
-    try {{
-        scriptResult = eval({code});
-    }} catch (e) {{
-        scriptError = {{ message: e.toString(), stack: e.stack }};
-    }}
+    try {
+        {code}
+    } catch (e) {
+        scriptError = { message: e.toString(), stack: e.stack };
+    }
     
     // Restore console.log
     console.log = originalLog;
     
     // Send execution receipt back to TypeScript
-    send({{
+    send({
         type: 'execution_receipt',
         result: scriptError ? undefined : (scriptResult !== undefined ? scriptResult.toString() : 'undefined'),
         error: scriptError,
         initial_logs: initialLogs
-    }});
-}})();
+    });
+})();
 `;
 
 /**
@@ -81,42 +81,42 @@ export const SCRIPT_READ_FILE_CHUNKS = `
 var filePath = {path};
 var chunkSize = 1024 * 1024; // 1MB chunks
 
-try {{
+try {
     var file = new File(filePath, 'rb');
     var totalSize = 0;
     var chunkIndex = 0;
     
-    while (true) {{
+    while (true) {
         var chunk = file.readBytes(chunkSize);
         if (chunk.byteLength === 0) break;
         
         // Send chunk with raw binary data
-        send({{
+        send({
             type: 'chunk',
             index: chunkIndex,
             size: chunk.byteLength
-        }}, chunk);
+        }, chunk);
         
         totalSize += chunk.byteLength;
         chunkIndex++;
-    }}
+    }
     
     file.close();
     
-    send({{
+    send({
         type: 'complete',
         status: 'success',
         totalSize: totalSize,
         chunkCount: chunkIndex
-    }});
-}} catch (e) {{
-    send({{
+    });
+} catch (e) {
+    send({
         type: 'error',
         status: 'error',
         error: e.toString(),
         message: 'Failed to read file: ' + e.message
-    }});
-}}
+    });
+}
 `;
 
 /**
@@ -126,31 +126,31 @@ export const SCRIPT_FIND_EXPORT = `
 var moduleName = {module_name};
 var exportName = {export_name};
 
-try {{
+try {
     var module = Process.findModuleByName(moduleName);
-    if (!module) {{
-        send({{ error: 'Module not found: ' + moduleName }});
-    }} else {{
+    if (!module) {
+        send({ error: 'Module not found: ' + moduleName });
+    } else {
         var exportAddr = module.findExportByName(exportName);
-        if (exportAddr) {{
-            send({{
+        if (exportAddr) {
+            send({
                 found: true,
                 module: moduleName,
                 export: exportName,
                 address: exportAddr.toString()
-            }});
-        }} else {{
-            send({{
+            });
+        } else {
+            send({
                 found: false,
                 module: moduleName,
                 export: exportName,
                 message: 'Export not found'
-            }});
-        }}
-    }}
-}} catch (e) {{
-    send({{ error: e.toString() }});
-}}
+            });
+        }
+    }
+} catch (e) {
+    send({ error: e.toString() });
+}
 `;
 
 /**
@@ -160,12 +160,12 @@ export const SCRIPT_READ_MEMORY = `
 var address = ptr({address});
 var length = {length};
 
-try {{
+try {
     var data = Memory.readByteArray(address, length);
-    send({{ success: true, length: length }}, data);
-}} catch (e) {{
-    send({{ success: false, error: e.toString() }});
-}}
+    send({ success: true, length: length }, data);
+} catch (e) {
+    send({ success: false, error: e.toString() });
+}
 `;
 
 /**
@@ -175,12 +175,12 @@ export const SCRIPT_WRITE_MEMORY = `
 var address = ptr({address});
 var data = {data};
 
-try {{
+try {
     Memory.writeByteArray(address, data);
-    send({{ success: true, bytesWritten: data.length }});
-}} catch (e) {{
-    send({{ success: false, error: e.toString() }});
-}}
+    send({ success: true, bytesWritten: data.length });
+} catch (e) {
+    send({ success: false, error: e.toString() });
+}
 `;
 
 /**
@@ -189,25 +189,25 @@ try {{
 export const SCRIPT_ENUMERATE_EXPORTS = `
 var moduleName = {module_name};
 
-try {{
+try {
     var module = Process.findModuleByName(moduleName);
-    if (!module) {{
-        send({{ error: 'Module not found: ' + moduleName }});
-    }} else {{
+    if (!module) {
+        send({ error: 'Module not found: ' + moduleName });
+    } else {
         var exports = module.enumerateExports();
-        send({{
+        send({
             module: moduleName,
             count: exports.length,
-            exports: exports.map(function(exp) {{
-                return {{
+            exports: exports.map(function(exp) {
+                return {
                     type: exp.type,
                     name: exp.name,
                     address: exp.address.toString()
-                }};
-            }})
-        }});
-    }}
-}} catch (e) {{
-    send({{ error: e.toString() }});
-}}
+                };
+            })
+        });
+    }
+} catch (e) {
+    send({ error: e.toString() });
+}
 `;

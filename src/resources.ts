@@ -1,9 +1,11 @@
+
 /**
  * MCP resource registration for Frida
  */
 
 import * as frida from 'frida';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getDevice, getSessionMessagesAsync, cleanupSession } from './helpers.js';
 import { logger } from './logger.js';
 import { sessions, scripts, scriptMessages } from './state.js';
@@ -14,72 +16,82 @@ import type { SessionInfo } from './types.js';
  */
 export function registerResources(server: McpServer): void {
     
-    // Frida version resource
-    server.registerResource(
-        'frida-version',
-        'frida://version',
-        {
-            name: 'Frida Version',
-            description: 'Get Frida version information',
-            mimeType: 'text/plain'
-        },
-        async () => ({
-            contents: [{
-                uri: 'frida://version',
-                text: '17.0.0', // Frida version - static for now
-                mimeType: 'text/plain'
-            }]
-        })
-    );
-    
-    // Devices resource
+    // Devices resource (static list)
     server.registerResource(
         'frida-devices',
         'frida://devices',
         {
             name: 'Frida Devices',
             description: 'List all connected Frida devices',
-            mimeType: 'text/plain'
+            mimeType: 'application/json'
         },
         async () => {
             const devices = await frida.enumerateDevices();
-            const text = devices.map(d => 
-                `ID: ${d.id}, Name: ${d.name}, Type: ${d.type}`
-            ).join('\n');
+            const deviceList = devices.map(d => ({
+                id: d.id,
+                name: d.name,
+                type: d.type
+            }));
             
             return {
                 contents: [{
                     uri: 'frida://devices',
-                    text,
-                    mimeType: 'text/plain'
+                    text: JSON.stringify(deviceList, null, 2),
+                    mimeType: 'application/json'
                 }]
             };
         }
     );
     
-    // Processes resource
+    // Device processes resource template
     server.registerResource(
-        'frida-processes',
-        'frida://processes',
+        'device-processes',
+        new ResourceTemplate('frida://devices/{device_id}/processes', { list: undefined }),
         {
-            name: 'Frida Processes',
-            description: 'List all processes from default device',
-            mimeType: 'text/plain'
+            name: 'Device Processes',
+            description: 'List processes on a specific Frida device. Use "local", "usb", or "remote" for automatic device selection, or provide a specific device ID.',
+            mimeType: 'application/json'
         },
-        async () => {
-            const device = await getDevice();
-            const processes = await device.enumerateProcesses();
-            const text = processes.map(p => 
-                `PID: ${p.pid}, Name: ${p.name}`
-            ).join('\n');
+        async (uri, { device_id }) => {
+            const deviceIdParam = String(device_id || '');
             
-            return {
-                contents: [{
-                    uri: 'frida://processes',
-                    text,
-                    mimeType: 'text/plain'
-                }]
-            };
+            // Map special keywords to device selection
+            let deviceId: string | undefined;
+            if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
+                deviceId = undefined; // Let getDevice handle auto-selection
+            } else {
+                deviceId = deviceIdParam;
+            }
+            
+            try {
+                const device = await getDevice(deviceId);
+                const processes = await device.enumerateProcesses();
+                const processList = processes.map(p => ({
+                    pid: p.pid,
+                    name: p.name
+                }));
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(processList, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            } catch (error) {
+                const errorResult = {
+                    error: `Failed to enumerate processes: ${error instanceof Error ? error.message : String(error)}`,
+                    device_id: deviceIdParam
+                };
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(errorResult, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            }
         }
     );
     
@@ -136,36 +148,283 @@ export function registerResources(server: McpServer): void {
         }
     );
     
-    // Session messages resource (dynamic)
+    // Device info resource template
     server.registerResource(
-        'session-messages',
-        'frida://sessions/{sessionId}/messages',
+        'device-info',
+        new ResourceTemplate('frida://devices/{device_id}', { list: undefined }),
         {
-            name: 'Session Messages',
-            description: 'Retrieve messages from persistent scripts (messages are consumed)',
+            name: 'Device Info',
+            description: 'Get detailed information about a specific device by ID',
             mimeType: 'application/json'
         },
-        async (uri: URL) => {
-            const pathParts = uri.pathname.split('/');
-            const sessionId = pathParts[pathParts.length - 2] || '';
+        async (uri, { device_id }) => {
+            const deviceId = String(device_id || '');
             
-            logger.info(`Message retrieval requested for session ${sessionId}`);
+            try {
+                const device = await frida.getDevice(deviceId);
+                const result = {
+                    id: device.id,
+                    name: device.name,
+                    type: device.type
+                };
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(result, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            } catch (error) {
+                const errorResult = {
+                    error: `Device with ID ${deviceId} not found`,
+                    device_id: deviceId
+                };
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(errorResult, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            }
+        }
+    );
+    
+    // Process by name resource template
+    server.registerResource(
+        'process-by-name',
+        new ResourceTemplate('frida://devices/{device_id}/processes/by-name/{process_name}', { list: undefined }),
+        {
+            name: 'Process by Name',
+            description: 'Find a process by name (case-insensitive partial match) on a specific device',
+            mimeType: 'application/json'
+        },
+        async (uri, { device_id, process_name }) => {
+            const deviceIdParam = String(device_id || '');
+            const processName = decodeURIComponent(String(process_name || ''));
+            
+            // Map special keywords to device selection
+            let deviceId: string | undefined;
+            if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
+                deviceId = undefined;
+            } else {
+                deviceId = deviceIdParam;
+            }
+            
+            try
+ {
+                const device = await getDevice(deviceId);
+                const processes = await device.enumerateProcesses();
+                
+                for (const proc of processes) {
+                    if (proc.name.toLowerCase().includes(processName.toLowerCase())) {
+                        const result = {
+                            pid: proc.pid,
+                            name: proc.name,
+                            found: true
+                        };
+                        
+                        return {
+                            contents: [{
+                                uri: uri.href,
+                                text: JSON.stringify(result, null, 2),
+                                mimeType: 'application/json'
+                            }]
+                        };
+                    }
+                }
+                
+                const result = {
+                    found: false,
+                    error: `Process '${processName}' not found`,
+                    device_id: deviceIdParam
+                };
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(result, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            } catch (error) {
+                const errorResult = {
+                    found: false,
+                    error: `Failed to search for process: ${error instanceof Error ? error.message : String(error)}`,
+                    device_id: deviceIdParam,
+                    process_name: processName
+                };
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(errorResult, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            }
+        }
+    );
+    
+    // Process module path resource template
+    server.registerResource(
+        'process-module-path',
+        new ResourceTemplate('frida://devices/{device_id}/processes/{pid}/module', { list: undefined }),
+        {
+            name: 'Process Module Path',
+            description: 'Get main module information for a process (path, base address, size)',
+            mimeType: 'application/json'
+        },
+        async (uri, { device_id, pid }) => {
+            const deviceIdParam = String(device_id || '');
+            const pidStr = String(pid || '');
+            const pidNum = parseInt(pidStr, 10);
+            
+            if (isNaN(pidNum)) {
+                const errorResult = {
+                    status: 'error',
+                    error: `Invalid PID: ${pidStr}`
+                };
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(errorResult, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            }
+            
+            // Map special keywords to device selection
+            let deviceId: string | undefined;
+            if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
+                deviceId = undefined;
+            } else {
+                deviceId = deviceIdParam;
+            }
+            
+            try {
+                const device = await getDevice(deviceId);
+                const session = await device.attach(pidNum);
+                
+                const script = await session.createScript(`
+                    var mainModule = Process.enumerateModules()[0];
+                    send({
+                        name: mainModule.name,
+                        path: mainModule.path,
+                        base: mainModule.base.toString(),
+                        size: mainModule.size
+                    });
+                `);
+                
+                const results: any[] = [];
+                script.message.connect((message: frida.Message) => {
+                    if (message.type === 'send') {
+                        results.push(message.payload);
+                    }
+                });
+                
+                await script.load();
+                
+                // Wait for result
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                await script.unload();
+                await session.detach();
+                
+                if (results.length > 0) {
+                    const result = {
+                        status: 'success',
+                        pid: pidNum,
+                        ...results[0]
+                    };
+                    
+                    return {
+                        contents: [{
+                            uri: uri.href,
+                            text: JSON.stringify(result, null, 2),
+                            mimeType: 'application/json'
+                        }]
+                    };
+                } else {
+                    const result = {
+                        status: 'error',
+                        error: 'Failed to get module information',
+                        pid: pidNum
+                    };
+                    
+                    return {
+                        contents: [{
+                            uri: uri.href,
+                            text: JSON.stringify(result, null, 2),
+                            mimeType: 'application/json'
+                        }]
+                    };
+                }
+            } catch (error) {
+                const result = {
+                    status: 'error',
+                    error: error instanceof Error ? error.message : String(error),
+                    pid: pidNum
+                };
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(result, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            }
+        }
+    );
+    
+    // Session messages resource template with optional limit
+    server.registerResource(
+        'session-messages',
+        new ResourceTemplate('frida://sessions/{sessionId}/messages', { list: undefined }),
+        {
+            name: 'Session Messages',
+            description: 'Retrieve messages from persistent scripts. Append /last:N to limit results (e.g., /last:10 for last 10 messages) or /all for unlimited. Default limit is 100 messages. Messages are consumed when retrieved.',
+            mimeType: 'application/json'
+        },
+        async (uri, { sessionId }) => {
+            const sessionIdStr = String(sessionId || '');
+            let limit: number | undefined = 100; // Default limit
+            
+            // Check for limit parameter in URI path
+            const pathParts = uri.pathname.split('/').filter(Boolean);
+            if (pathParts[3]) {
+                const limitPart = pathParts[3];
+                if (limitPart.startsWith('last:')) {
+                    const limitValue = parseInt(limitPart.substring(5), 10);
+                    if (!isNaN(limitValue) && limitValue > 0) {
+                        limit = limitValue;
+                    }
+                } else if (limitPart === 'all') {
+                    limit = undefined; // No limit
+                }
+            }
+            
+            logger.info(`Message retrieval requested for session ${sessionIdStr}, limit=${limit || 'unlimited'}`);
             const startTime = Date.now();
             
             try {
                 // Validate session exists and is alive
-                const session = sessions.get(sessionId);
+                const session = sessions.get(sessionIdStr);
                 if (session) {
                     const isDetached = session.isDetached();
                     logger.debug(`Session found, is_detached=${isDetached}`);
                     if (isDetached) {
-                        logger.warning(`Session ${sessionId} is detached, cleaning up`);
-                        cleanupSession(sessionId);
+                        logger.warning(`Session ${sessionIdStr} is detached, cleaning up`);
+                        cleanupSession(sessionIdStr);
                         
                         const result = {
                             status: 'error',
-                            error: `Session ${sessionId} is detached and has been cleaned up`,
-                            session_id: sessionId
+                            error: `Session ${sessionIdStr} is detached and has been cleaned up`,
+                            session_id: sessionIdStr
                         };
                         
                         return {
@@ -177,17 +436,27 @@ export function registerResources(server: McpServer): void {
                         };
                     }
                 } else {
-                    logger.warning(`Session ${sessionId} not in sessions dict`);
+                    logger.warning(`Session ${sessionIdStr} not in sessions dict`);
                 }
                 
                 // Use the async function with timeout protection (50s to leave margin)
                 logger.debug('Calling getSessionMessagesAsync with 50s timeout');
                 const result = await Promise.race([
-                    getSessionMessagesAsync(sessionId, 50000),
+                    getSessionMessagesAsync(sessionIdStr, 50000),
                     new Promise<any>((_, reject) => 
                         setTimeout(() => reject(new Error('Timeout')), 55000)
                     )
                 ]);
+                
+                // Apply limit if specified
+                if (result.status === 'success' && result.messages && limit !== undefined) {
+                    const originalCount = result.messages.length;
+                    result.messages = result.messages.slice(-limit);
+                    result.messages_retrieved = result.messages.length;
+                    if (result.messages.length < originalCount) {
+                        result.info = `Retrieved last ${result.messages.length} of ${originalCount} available messages`;
+                    }
+                }
                 
                 const elapsed = (Date.now() - startTime) / 1000;
                 logger.info(`Success in ${elapsed.toFixed(3)}s, returning ${result.messages_retrieved || 0} messages`);
@@ -207,7 +476,7 @@ export function registerResources(server: McpServer): void {
                 const result = {
                     status: 'error',
                     error: `Failed to retrieve messages: ${error instanceof Error ? error.message : String(error)}`,
-                    session_id: sessionId,
+                    session_id: sessionIdStr,
                     elapsed_seconds: Math.round(elapsed * 1000) / 1000
                 };
                 

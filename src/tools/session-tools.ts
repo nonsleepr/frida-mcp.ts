@@ -119,7 +119,7 @@ export function registerSessionTools(server: McpServer): void {
             
             try {
                 // Wrap the code using the template
-                const wrappedCode = SCRIPT_EXECUTE_WRAPPER.replace('{code}', JSON.stringify(javascript_code));
+                const wrappedCode = SCRIPT_EXECUTE_WRAPPER.replace('{code}', javascript_code);
                 
                 const script = await session.createScript(wrappedCode);
                 
@@ -288,7 +288,7 @@ export function registerSessionTools(server: McpServer): void {
                 const javascriptCode = await fs.readFile(script_path, 'utf-8');
                 
                 // Wrap the code using the template (same as execute_in_session)
-                const wrappedCode = SCRIPT_EXECUTE_WRAPPER.replace('{code}', JSON.stringify(javascriptCode));
+                const wrappedCode = SCRIPT_EXECUTE_WRAPPER.replace('{code}', javascriptCode);
                 
                 const script = await session.createScript(wrappedCode);
                 
@@ -422,60 +422,4 @@ export function registerSessionTools(server: McpServer): void {
         }
     );
     
-    // Get Session Messages
-    server.registerTool(
-        'get_session_messages',
-        {
-            title: 'Get Session Messages',
-            description: 'Retrieve messages from persistent scripts in a session. Messages are consumed (removed from queue) when retrieved.',
-            inputSchema: {
-                session_id: z.string().describe('Session ID to retrieve messages from'),
-                max_messages: z.number().optional().describe('Maximum number of messages to retrieve (default: unlimited)')
-            },
-            outputSchema: {
-                status: z.string(),
-                session_id: z.string().optional(),
-                messages: z.array(z.any()).optional(),
-                messages_retrieved: z.number().optional(),
-                elapsed_seconds: z.number().optional(),
-                error: z.string().optional(),
-                info: z.string().optional()
-            }
-        },
-        async ({ session_id, max_messages }: {
-            session_id: string;
-            max_messages?: number;
-        }) => {
-            try {
-                // Use the helper function to retrieve messages with timeout
-                const result = await getSessionMessagesAsync(session_id, 5000);
-                
-                // If max_messages is specified, limit the returned messages
-                if (result.status === 'success' && result.messages && max_messages) {
-                    const limitedMessages = result.messages.slice(0, max_messages);
-                    result.messages = limitedMessages;
-                    result.messages_retrieved = limitedMessages.length;
-                    if (limitedMessages.length < result.messages.length) {
-                        result.info = `Retrieved ${limitedMessages.length} of ${result.messages.length} available messages`;
-                    }
-                }
-                
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-                    structuredContent: result
-                };
-            } catch (error) {
-                const result = {
-                    status: 'error',
-                    error: error instanceof Error ? error.message : String(error),
-                    session_id
-                };
-                
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-                    structuredContent: result
-                };
-            }
-        }
-    );
 }

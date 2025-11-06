@@ -1,6 +1,7 @@
+
 # Frida MCP Server
 
-A Modern Context Protocol (MCP) server that provides dynamic instrumentation capabilities through Frida. Built with TypeScript and optimized for Bun runtime.
+A Model Context Protocol (MCP) server that provides dynamic instrumentation capabilities through Frida. Built with TypeScript and optimized for Bun runtime.
 
 ## Features
 
@@ -8,8 +9,9 @@ A Modern Context Protocol (MCP) server that provides dynamic instrumentation cap
 - **Device Management**: Support for local, USB, and remote Frida devices
 - **Process Control**: Spawn, attach, resume, and kill processes
 - **Interactive Sessions**: Create persistent sessions for complex instrumentation workflows
-- **File Operations**: Download files from instrumented processes
-- **MCP Resources**: Real-time access to devices, processes, and session information
+- **Script Execution**: Execute JavaScript code with both one-shot and persistent modes
+- **File Operations**: Download files from instrumented processes and query module information
+- **MCP Resources**: Real-time access to devices, processes, sessions, and script messages
 
 ## Prerequisites
 
@@ -43,17 +45,9 @@ bun run start
 bun run dev
 ```
 
-### HTTP Mode (Coming Soon)
+### HTTP and SSE Modes
 
-```bash
-bun run start:http
-```
-
-### SSE Mode (Coming Soon)
-
-```bash
-bun run start:sse
-```
+HTTP (streamable-http) and SSE transport modes are not yet implemented. Currently, only stdio mode is supported.
 
 ## Configuration
 
@@ -66,7 +60,7 @@ bun run start:sse
 
 Add to your Claude Desktop config file:
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
@@ -121,48 +115,108 @@ Edit `.roo/mcp.json` and set the `FRIDA_REMOTE_HOST` environment variable:
 
 ### Device Tools
 
-- `enumerate_devices`: List all connected Frida devices
-- `get_device_info`: Get detailed information about a specific device
-- `enumerate_processes`: List all processes on a device
-- `get_process_by_name`: Find a process by name (supports partial matching)
-- `attach_to_process`: Test attachment to a running process
+- **`attach_to_process`**: Test attachment to a running process
+  - Parameters: `pid` (number), `device_id` (optional string)
+  - Returns: Attachment status (immediately detaches)
+  - Note: For persistent sessions, use `create_interactive_session`
 
 ### Process Tools
 
-- `spawn_process`: Spawn a new process with Frida attached
-- `resume_process`: Resume a spawned process
-- `kill_process`: Terminate a process
+- **`spawn_process`**: Spawn a new process with Frida attached
+  - Parameters: `program` (string), `args` (optional string[]), `device_id` (optional string)
+  - Returns: PID of spawned process
+  - Note: Process spawns in paused state; use `resume_process` to continue execution
+
+- **`resume_process`**: Resume a spawned process
+  - Parameters: `pid` (number), `device_id` (optional string)
+  - Returns: Success status
+
+- **`kill_process`**: Terminate a process
+  - Parameters: `pid` (number), `device_id` (optional string)
+  - Returns: Success status
+  - Note: Includes 30-second timeout protection
 
 ### Session Tools
 
-- `create_interactive_session`: Create a persistent instrumentation session
-- `execute_in_session`: Execute JavaScript code in an active session
-- `load_script_file`: Load and execute a Frida script from a file
-- `get_session_messages`: Retrieve messages from persistent scripts (also available as resource)
+- **`create_interactive_session`**: Create a persistent instrumentation session
+  - Parameters: `process_id` (number), `device_id` (optional string)
+  - Returns: `session_id` for use with other session commands
+  - Use case: Establishes a session for injecting JavaScript and monitoring the process
+
+- **`execute_in_session`**: Execute JavaScript code in an active session
+  - Parameters: `session_id` (string), `javascript_code` (string), `keep_alive` (optional boolean, default: false)
+  - Returns: Execution results, initial logs, and errors if any
+  - Modes:
+    - `keep_alive=false`: Script runs once and unloads (for queries)
+    - `keep_alive=true`: Script persists for continuous monitoring (retrieve messages via resource)
+
+- **`load_script_file`**: Load and execute a Frida script from a file
+  - Parameters: `session_id` (string), `script_path` (string), `keep_alive` (optional boolean, default: true)
+  - Returns: Execution results with file path reference
+  - Note: Reads JavaScript files from filesystem and executes them
 
 ### File Tools
 
-- `get_process_module_path`: Get information about a process's main module
-- `download_file`: Download files from a remote system via instrumentation
+- **`download_file`**: Download files from a remote system via instrumentation
+  - Parameters: `file_path` (string), `output_path` (string), `pid` (optional number), `device_id` (optional string)
+  - Returns: File size, chunk count, and local path
+  - Note: Uses double backslashes for Windows paths; works best for files up to ~500MB with 60s timeout
 
 ## Available Resources
 
-- `frida://version`: Frida version information
-- `frida://devices`: List of connected devices
-- `frida://processes`: List of processes on default device
-- `frida://sessions`: Active instrumentation sessions
-- `frida://sessions/{sessionId}/messages`: Retrieve messages from persistent scripts
+Resources provide real-time, read-only access to Frida state via URI. Resources use URI templates for parameterized access.
+
+### Static Resources
+
+- **`frida://devices`**: List of all connected devices with IDs, names, and types
+- **`frida://sessions`**: Active instrumentation sessions with detailed status (script count, pending messages, etc.)
+
+### Resource Templates
+
+- **`frida://devices/{device_id}`**: Get detailed information about a specific device
+  - Examples:
+    - `frida://devices/local` - Local device info
+    - `frida://devices/usb` - USB device info
+    - `frida://devices/{specific-device-id}` - Info for specific device by ID
+
+- **`frida://devices/{device_id}/processes`**: List processes on a specific device
+  - Examples:
+    - `frida://devices/local/processes` - Local device processes
+    - `frida://devices/usb/processes` - USB device processes
+    - `frida://devices/remote/processes` - Remote device processes (uses `FRIDA_REMOTE_HOST` env var)
+    - `frida://devices/{specific-device-id}/processes` - Processes on a specific device by ID
+
+- **`frida://devices/{device_id}/processes/by-name/{process_name}`**: Find a process by name (case-insensitive partial match)
+  - Examples:
+    - `frida://devices/local/processes/by-name/chrome` - Find Chrome on local device
+    - `frida://devices/usb/processes/by-name/Calculator` - Find Calculator on USB device
+  - Note: Returns first matching process
+
+- **`frida://devices/{device_id}/processes/{pid}/module`**: Get main module information for a process
+  - Examples:
+    - `frida://devices/local/processes/1234/module` - Main module for PID 1234 on local device
+    - `frida://devices/usb/processes/5678/module` - Main module for PID 5678 on USB device
+  - Returns: Module name, path, base address, and size
+
+- **`frida://sessions/{sessionId}/messages[/last:N or /all]`**: Retrieve messages from persistent scripts
+  - Default limit: 100 messages
+  - Examples:
+    - `frida://sessions/session_1234_5678/messages` - Last 100 messages (default)
+    - `frida://sessions/session_1234_5678/messages/last:10` - Last 10 messages
+    - `frida://sessions/session_1234_5678/messages/last:1` - Most recent message only
+    - `frida://sessions/session_1234_5678/messages/all` - All messages (no limit)
+  - Note: Messages are consumed (removed from queue) when retrieved
 
 ## Example Workflows
 
 ### Basic Process Instrumentation
 
 ```javascript
-// 1. List processes
-enumerate_processes()
+// 1. List processes on local device
+// Access resource: frida://devices/local/processes
 
 // 2. Find target process
-get_process_by_name({ name: "myapp" })
+// Access resource: frida://devices/local/processes/by-name/myapp
 
 // 3. Create session
 create_interactive_session({ process_id: 1234 })
@@ -182,7 +236,40 @@ execute_in_session({
 })
 
 // 5. Retrieve messages
-// Access resource: frida://sessions/session_1234_.../messages
+// Access resource: frida://sessions/session_1234_.../messages/last:10
+```
+
+### Spawning and Instrumenting a Process
+
+```javascript
+// 1. Spawn process in paused state
+spawn_process({ 
+  program: "/path/to/app",
+  args: ["--debug"]
+})
+
+// 2. Create session for the spawned process
+create_interactive_session({ process_id: 5678 })
+
+// 3. Load instrumentation script
+execute_in_session({
+  session_id: "session_5678_...",
+  javascript_code: `
+    // Hook before process starts
+    Interceptor.attach(Module.findExportByName(null, "malloc"), {
+      onEnter: function(args) {
+        console.log("malloc size:", args[0].toInt32());
+      }
+    });
+  `,
+  keep_alive: true
+})
+
+// 4. Resume process execution
+resume_process({ pid: 5678 })
+
+// 5. Monitor messages
+// Access resource: frida://sessions/session_5678_.../messages
 ```
 
 ### Remote Device Instrumentation
@@ -196,6 +283,27 @@ export FRIDA_REMOTE_PORT=27042
 bun run start
 ```
 
+Then access remote device processes via resource:
+```
+frida://devices/remote/processes
+```
+
+Tools will also automatically connect to the remote device when device_id is not specified.
+
+### File Download from Remote System
+
+```javascript
+// 1. Find target process (or specify PID directly)
+get_process_by_name({ name: "explorer" })
+
+// 2. Download file
+download_file({
+  file_path: "C:\\\\Windows\\\\System32\\\\notepad.exe",
+  output_path: "./downloaded_notepad.exe",
+  pid: 1234  // Optional, will find explorer.exe if not specified
+})
+```
+
 ## Development
 
 ### Project Structure
@@ -203,23 +311,32 @@ bun run start
 ```
 frida-mcp-server/
 ├── src/
-│   ├── index.ts              # Main entry point
+│   ├── index.ts              # Main entry point and server initialization
 │   ├── types.ts              # TypeScript type definitions
 │   ├── logger.ts             # Logging utility
-│   ├── state.ts              # Global state management
+│   ├── state.ts              # Global state management (sessions, scripts, messages)
 │   ├── scripts.ts            # Frida script templates
-│   ├── helpers.ts            # Helper functions
+│   ├── helpers.ts            # Helper functions (device selection, script execution)
 │   ├── resources.ts          # MCP resource registration
 │   └── tools/
 │       ├── device-tools.ts   # Device management tools
 │       ├── process-tools.ts  # Process control tools
 │       ├── session-tools.ts  # Session management tools
 │       └── file-tools.ts     # File operation tools
+├── .roo/
+│   └── mcp.json             # Roo MCP server configuration
 ├── package.json
 ├── tsconfig.json
 ├── .gitignore
 └── README.md
 ```
+
+### Key Components
+
+- **State Management** ([`src/state.ts`](src/state.ts:1)): Manages active sessions, loaded scripts, and message queues
+- **Device Selection** ([`src/helpers.ts`](src/helpers.ts:26)): Implements priority-based device selection (explicit ID → remote → USB → local)
+- **Script Execution** ([`src/scripts.ts`](src/scripts.ts:40)): Provides templates for common Frida operations with console.log capture
+- **Message Handling** ([`src/helpers.ts`](src/helpers.ts:126)): Async message retrieval with timeout protection
 
 ### Type Checking
 
@@ -233,11 +350,55 @@ bun run type-check
 bun run build
 ```
 
+## Architecture
+
+### Device Selection Priority
+
+The server uses the following priority order for device selection:
+
+1. **Explicit `device_id` parameter** (if provided in tool call)
+2. **`FRIDA_REMOTE_HOST` environment variable** (for remote debugging)
+3. **USB device** (for mobile device debugging)
+4. **Local device** (fallback for local process instrumentation)
+
+This is implemented in [`getDevice()`](src/helpers.ts:26) helper function.
+
+### Script Execution Modes
+
+The server supports two execution modes for JavaScript code:
+
+- **One-shot mode** (`keep_alive=false`): 
+  - Script executes once and immediately unloads
+  - Use for queries and one-time operations
+  - Returns immediate results in response
+  - Example: Reading memory, enumerating modules
+
+- **Persistent mode** (`keep_alive=true`):
+  - Script remains loaded for continuous monitoring
+  - Use for hooks and continuous instrumentation
+  - Retrieve messages via [`get_session_messages()`](src/tools/session-tools.ts:426) tool or [`frida://sessions/{sessionId}/messages`](src/resources.ts:140) resource
+  - Example: Function hooking, event monitoring
+
+### Message Queue Implementation
+
+- Uses array-based queue (suitable for single-threaded JavaScript runtime)
+- Messages are stored per session in [`scriptMessages`](src/state.ts:15) Map
+- Messages are consumed (removed) when retrieved
+- Supports timeout protection for message retrieval
+
+### Timeout Protection
+
+The following operations include timeout protection:
+
+- [`kill_process()`](src/tools/process-tools.ts:115): 30-second timeout
+- [`download_file()`](src/tools/file-tools.ts:86): 60-second timeout
+- [`getSessionMessagesAsync()`](src/helpers.ts:126): Configurable timeout (default: 5 seconds)
+
 ## Troubleshooting
 
 ### TypeScript Errors During Development
 
-The TypeScript errors you see during development are expected until dependencies are installed:
+TypeScript errors during development are expected until dependencies are installed:
 
 ```bash
 bun install
@@ -261,6 +422,7 @@ For remote devices:
 1. Ensure `frida-server` is running on the target device
 2. Verify network connectivity
 3. Check firewall settings
+4. Confirm the correct port (default: 27042)
 
 ### Process Attachment Failures
 
@@ -268,6 +430,24 @@ Common causes:
 - Process doesn't exist or has terminated
 - Insufficient permissions (may need root/administrator)
 - Anti-debugging protections in target process
+- Process is already being debugged by another tool
+
+### Session Messages Not Appearing
+
+If messages from persistent scripts aren't appearing:
+1. Verify the script is loaded with `keep_alive=true`
+2. Check that the script is using `send()` to emit messages
+3. Ensure the session is still alive (check [`frida://sessions`](src/resources.ts:86) resource)
+4. Try retrieving messages with [`get_session_messages()`](src/tools/session-tools.ts:426) tool
+
+### File Download Issues
+
+If file downloads fail:
+1. Use double backslashes for Windows paths (e.g., `C:\\\\path\\\\to\\\\file`)
+2. Ensure the file exists and is accessible
+3. Check file size (works best for files up to ~500MB)
+4. Verify sufficient permissions to read the file
+5. Try specifying a PID explicitly if auto-detection fails
 
 ## Contributing
 
@@ -279,66 +459,17 @@ MIT
 
 ## Implementation Notes
 
-### Python vs TypeScript Behavioral Differences
+### TypeScript Implementation
 
-This TypeScript implementation maintains functional parity with the Python reference implementation (`frida-mcp.py`) with the following architectural differences:
+This TypeScript implementation maintains functional parity with Python reference implementations while leveraging TypeScript's type safety and Bun's performance characteristics.
 
-#### Message Queue Implementation
-- **Python**: Uses thread-safe `asyncio.Queue` with event loop integration
-- **TypeScript**: Uses array-based queue (suitable for single-threaded JavaScript runtime)
-- **Impact**: Both implementations are functionally equivalent for their respective runtimes
+#### Key Design Decisions
 
-#### Tool Behavior Alignment
+1. **Array-Based Message Queue**: Uses JavaScript arrays instead of async queues, suitable for single-threaded runtime
+2. **Timeout Protection**: Implements Promise.race patterns for timeout handling
+3. **Type Safety**: Comprehensive TypeScript types for all Frida objects and responses
+4. **Modular Architecture**: Tools organized by functionality (device, process, session, file)
 
-All tools now match Python behavior:
+#### Tool Behavior
 
-1. **`attach_to_process()`**: Simple attachment that immediately detaches (matches Python)
-   - Returns `{pid, success, is_detached}` status
-   - Use `create_interactive_session()` for persistent sessions
-
-2. **`kill_process()`**: Includes 30-second timeout protection (matches Python)
-   - Prevents hanging on unresponsive processes
-   - Returns timeout error if operation exceeds limit
-
-3. **`load_script_file()`**: Fully implemented (matches Python)
-   - Reads JavaScript files from filesystem
-   - Executes with same wrapper as `execute_in_session()`
-   - Supports both `keep_alive` modes
-
-4. **`get_session_messages()`**: Available as both tool and resource (matches Python)
-   - Tool: `get_session_messages(session_id, max_messages?)`
-   - Resource: `frida://sessions/{sessionId}/messages`
-   - Messages are consumed (removed from queue) when retrieved
-
-#### Device Selection Priority
-
-Both implementations use identical device selection logic:
-1. Explicit `device_id` parameter (if provided)
-2. `FRIDA_REMOTE_HOST` environment variable (for remote debugging)
-3. USB device (for mobile device debugging)
-4. Local device (fallback for local process instrumentation)
-
-#### Script Execution Modes
-
-Both implementations support two execution modes:
-
-- **One-shot mode** (`keep_alive=false`): Script executes once and unloads
-  - Use for queries and one-time operations
-  - Returns immediate results in response
-
-- **Persistent mode** (`keep_alive=true`): Script remains loaded for continuous monitoring
-  - Use for hooks and continuous instrumentation
-  - Retrieve messages via `get_session_messages()` tool or resource
-
-### Timeout Protection
-
-The following operations include timeout protection:
-- `kill_process()`: 30-second timeout (matches Python)
-- `download_file()`: 60-second timeout for file operations
-
-## Related Projects
-
-- [Frida](https://frida.re/) - Dynamic instrumentation toolkit
-- [Model Context Protocol](https://modelcontextprotocol.io/) - Protocol for AI-tool integration
-- [Claude Desktop](https://claude.ai/) - AI assistant with MCP support
-- [Roo](https://roo.cline.bot/) - AI coding assistant with MCP support
+All tools match expected Frida
