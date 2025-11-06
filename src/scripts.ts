@@ -6,21 +6,6 @@
  */
 
 /**
- * Template for enumerating loaded modules in a process
- */
-export const SCRIPT_ENUMERATE_MODULES = `
-var modules = Process.enumerateModules();
-send(modules.map(function(m) {
-    return {
-        name: m.name,
-        base: m.base.toString(),
-        size: m.size,
-        path: m.path
-    };
-}));
-`;
-
-/**
  * Template for getting main module information
  */
 export const SCRIPT_GET_MODULE_PATH = `
@@ -116,98 +101,5 @@ try {
         error: e.toString(),
         message: 'Failed to read file: ' + e.message
     });
-}
-`;
-
-/**
- * Template for finding exported functions
- */
-export const SCRIPT_FIND_EXPORT = `
-var moduleName = {module_name};
-var exportName = {export_name};
-
-try {
-    var module = Process.findModuleByName(moduleName);
-    if (!module) {
-        send({ error: 'Module not found: ' + moduleName });
-    } else {
-        var exportAddr = module.findExportByName(exportName);
-        if (exportAddr) {
-            send({
-                found: true,
-                module: moduleName,
-                export: exportName,
-                address: exportAddr.toString()
-            });
-        } else {
-            send({
-                found: false,
-                module: moduleName,
-                export: exportName,
-                message: 'Export not found'
-            });
-        }
-    }
-} catch (e) {
-    send({ error: e.toString() });
-}
-`;
-
-/**
- * Template for reading memory at an address
- */
-export const SCRIPT_READ_MEMORY = `
-var address = ptr({address});
-var length = {length};
-
-try {
-    var data = Memory.readByteArray(address, length);
-    send({ success: true, length: length }, data);
-} catch (e) {
-    send({ success: false, error: e.toString() });
-}
-`;
-
-/**
- * Template for writing memory at an address
- */
-export const SCRIPT_WRITE_MEMORY = `
-var address = ptr({address});
-var data = {data};
-
-try {
-    Memory.writeByteArray(address, data);
-    send({ success: true, bytesWritten: data.length });
-} catch (e) {
-    send({ success: false, error: e.toString() });
-}
-`;
-
-/**
- * Template for enumerating exports from a module
- */
-export const SCRIPT_ENUMERATE_EXPORTS = `
-var moduleName = {module_name};
-
-try {
-    var module = Process.findModuleByName(moduleName);
-    if (!module) {
-        send({ error: 'Module not found: ' + moduleName });
-    } else {
-        var exports = module.enumerateExports();
-        send({
-            module: moduleName,
-            count: exports.length,
-            exports: exports.map(function(exp) {
-                return {
-                    type: exp.type,
-                    name: exp.name,
-                    address: exp.address.toString()
-                };
-            })
-        });
-    }
-} catch (e) {
-    send({ error: e.toString() });
 }
 `;
