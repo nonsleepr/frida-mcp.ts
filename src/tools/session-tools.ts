@@ -25,7 +25,7 @@ export function registerSessionTools(server: McpServer): void {
             description: 'Create an interactive session for dynamic instrumentation. Establishes a Frida session for injecting JavaScript, hooking functions, and monitoring the target process. The session persists until explicitly closed or the process terminates.',
             inputSchema: {
                 process_id: z.number().describe('PID of target process'),
-                device_id: z.string().optional().describe('Optional device ID')
+                device_id: z.string().optional().describe('Optional device ID or connection string (hostname:port or hostname)')
             },
             outputSchema: {
                 status: z.string(),

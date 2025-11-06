@@ -24,7 +24,7 @@ export function registerFileTools(server: McpServer): void {
                 file_path: z.string().describe('Remote file path (use double backslashes on Windows)'),
                 output_path: z.string().describe('Local output path'),
                 pid: z.number().optional().describe('Optional PID to attach to (finds explorer.exe if not specified)'),
-                device_id: z.string().optional().describe('Optional device ID')
+                device_id: z.string().optional().describe('Optional device ID or connection string (hostname:port or hostname)')
             },
             outputSchema: {
                 status: z.string(),

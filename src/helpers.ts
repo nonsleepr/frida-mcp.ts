@@ -9,16 +9,18 @@ import type { ScriptMessage } from './types.js';
 
 /**
  * Get a Frida device by ID or use default detection.
- * 
+ *
  * Device selection priority:
- * 1. If device_id is specified, use that exact device
+ * 1. If device_id is specified:
+ *    - Connection strings (hostname:port or hostname) are added as remote devices
+ *    - Standard device IDs ("local", "usb", etc.) are resolved via getDevice()
  * 2. If FRIDA_REMOTE_HOST env var is set, use remote device
  * 3. Try USB device (for mobile device debugging)
  * 4. Fall back to local device (for local process instrumentation)
- * 
- * @param deviceId - Optional specific device ID to use
+ *
+ * @param deviceId - Optional device ID or connection string (hostname:port or hostname)
  * @returns The selected Frida device
- * 
+ *
  * Environment Variables:
  *     FRIDA_REMOTE_HOST: Remote Frida server hostname/IP
  *     FRIDA_REMOTE_PORT: Remote Frida server port (default: 27042)
@@ -26,6 +28,28 @@ import type { ScriptMessage } from './types.js';
 export async function getDevice(deviceId?: string): Promise<frida.Device> {
     // Priority 1: Explicit device ID provided
     if (deviceId) {
+        // Check if it's a connection string by attempting to parse as URL
+        // Skip standard device keywords
+        if (!['local', 'usb', 'remote'].includes(deviceId.toLowerCase())) {
+            try {
+                // Try parsing as URL with dummy protocol
+                const url = new URL(`tcp://${deviceId}`);
+                const host = url.hostname;
+                const port = url.port ? parseInt(url.port, 10) : 27042;
+                
+                // If we successfully parsed hostname, treat as connection string
+                if (host) {
+                    const remoteAddress = `${host}:${port}`;
+                    logger.info(`Adding remote device: ${remoteAddress}`);
+                    const deviceManager = frida.getDeviceManager();
+                    return await deviceManager.addRemoteDevice(remoteAddress);
+                }
+            } catch {
+                // Not a valid URL format, fall through to standard device lookup
+            }
+        }
+        
+        // Standard device ID
         return await frida.getDevice(deviceId);
     }
     

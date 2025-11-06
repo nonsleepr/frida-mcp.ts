@@ -20,7 +20,7 @@ export function registerDeviceTools(server: McpServer): void {
             description: 'Attach to a running process by PID. Returns attachment status without creating a persistent session. Use create_interactive_session for session-based instrumentation.',
             inputSchema: {
                 pid: z.number().describe('Process ID to attach to'),
-                device_id: z.string().optional().describe('Optional device ID')
+                device_id: z.string().optional().describe('Optional device ID or connection string (hostname:port or hostname)')
             },
             outputSchema: {
                 pid: z.number(),

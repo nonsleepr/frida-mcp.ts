@@ -49,7 +49,7 @@ export function registerResources(server: McpServer): void {
         new ResourceTemplate('frida://devices/{device_id}/processes', { list: undefined }),
         {
             name: 'Device Processes',
-            description: 'List processes on a specific Frida device. Use "local", "usb", or "remote" for automatic device selection, or provide a specific device ID.',
+            description: 'List processes on a specific Frida device. Use "local", "usb", or "remote" for automatic device selection, provide a specific device ID, or use a connection string (hostname:port or hostname).',
             mimeType: 'application/json'
         },
         async (uri, { device_id }) => {
@@ -60,6 +60,7 @@ export function registerResources(server: McpServer): void {
             if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
                 deviceId = undefined; // Let getDevice handle auto-selection
             } else {
+                // Pass through - getDevice will handle connection strings
                 deviceId = deviceIdParam;
             }
             
@@ -198,7 +199,7 @@ export function registerResources(server: McpServer): void {
         new ResourceTemplate('frida://devices/{device_id}/processes/by-name/{process_name}', { list: undefined }),
         {
             name: 'Process by Name',
-            description: 'Find a process by name (case-insensitive partial match) on a specific device',
+            description: 'Find a process by name (case-insensitive partial match) on a specific device. Supports connection strings (hostname:port or hostname).',
             mimeType: 'application/json'
         },
         async (uri, { device_id, process_name }) => {
@@ -210,6 +211,7 @@ export function registerResources(server: McpServer): void {
             if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
                 deviceId = undefined;
             } else {
+                // Pass through - getDevice will handle connection strings
                 deviceId = deviceIdParam;
             }
             
@@ -274,7 +276,7 @@ export function registerResources(server: McpServer): void {
         new ResourceTemplate('frida://devices/{device_id}/processes/{pid}/module', { list: undefined }),
         {
             name: 'Process Module Path',
-            description: 'Get main module information for a process (path, base address, size)',
+            description: 'Get main module information for a process (path, base address, size). Supports connection strings (hostname:port or hostname).',
             mimeType: 'application/json'
         },
         async (uri, { device_id, pid }) => {
@@ -302,6 +304,7 @@ export function registerResources(server: McpServer): void {
             if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
                 deviceId = undefined;
             } else {
+                // Pass through - getDevice will handle connection strings
                 deviceId = deviceIdParam;
             }
             

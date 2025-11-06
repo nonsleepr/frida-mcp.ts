@@ -21,7 +21,7 @@ export function registerProcessTools(server: McpServer): void {
             inputSchema: {
                 program: z.string().describe('Path to executable to spawn'),
                 args: z.array(z.string()).optional().describe('Optional command-line arguments'),
-                device_id: z.string().optional().describe('Optional device ID')
+                device_id: z.string().optional().describe('Optional device ID or connection string (hostname:port or hostname)')
             },
             outputSchema: {
                 pid: z.number().optional(),
@@ -72,7 +72,7 @@ export function registerProcessTools(server: McpServer): void {
             description: 'Resume a spawned process.',
             inputSchema: {
                 pid: z.number().describe('Process ID to resume'),
-                device_id: z.string().optional().describe('Optional device ID')
+                device_id: z.string().optional().describe('Optional device ID or connection string (hostname:port or hostname)')
             },
             outputSchema: {
                 success: z.boolean(),
@@ -119,7 +119,7 @@ export function registerProcessTools(server: McpServer): void {
             description: 'Kill a process by PID.',
             inputSchema: {
                 pid: z.number().describe('Process ID to kill'),
-                device_id: z.string().optional().describe('Optional device ID')
+                device_id: z.string().optional().describe('Optional device ID or connection string (hostname:port or hostname)')
             },
             outputSchema: {
                 success: z.boolean(),
