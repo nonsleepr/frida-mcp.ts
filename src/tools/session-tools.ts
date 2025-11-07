@@ -82,7 +82,7 @@ export function registerSessionTools(server: McpServer): void {
         'execute_in_session',
         {
             title: 'Execute in Session',
-            description: 'Execute JavaScript code within an existing Frida session. Modes: keep_alive=false: Script runs once and unloads (use for queries). keep_alive=true: Script persists for hooks (retrieve messages via frida://sessions/{session_id}/messages resource).',
+            description: 'Execute JavaScript code within an existing Frida session. keep_alive=false (default): Script runs once, results in initial_logs. keep_alive=true: Script persists for hooks, retrieve messages via frida://sessions/{session_id}/messages resource.',
             inputSchema: {
                 session_id: z.string().describe('Session ID from create_interactive_session'),
                 javascript_code: z.string().describe('JavaScript code to execute'),
