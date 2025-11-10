@@ -4,7 +4,6 @@ node_modules/
 .pnp.*
 
 # Build outputs
-dist/
 build/
 *.tsbuildinfo
 
