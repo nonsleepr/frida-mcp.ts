@@ -6,11 +6,10 @@
 import * as frida from 'frida';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getDevice, generateSessionId, sleep, getSessionMessagesAsync } from '../helpers.js';
+import { getDevice, generateSessionId, sleep, cleanupSession } from '../helpers.js';
 import { logger } from '../logger.js';
 import { sessions, scripts, scriptMessages } from '../state.js';
-import type { ScriptMessage, ExecutionReceipt } from '../types.js';
-import { SCRIPT_EXECUTE_WRAPPER } from '../scripts.js';
+import type { ScriptMessage } from '../types.js';
 
 /**
  * Register session management tools with the MCP server
@@ -49,6 +48,12 @@ export function registerSessionTools(server: McpServer): void {
                 sessions.set(sessionId, session);
                 scripts.set(sessionId, []);
                 scriptMessages.set(sessionId, []);
+                
+                // Setup session lifecycle management - auto-cleanup on detach
+                session.detached.connect((reason, crash) => {
+                    logger.info(`Session ${sessionId} detached: ${reason}${crash ? ' (crashed)' : ''}`);
+                    cleanupSession(sessionId);
+                });
                 
                 logger.info(`Session ${sessionId} created successfully`);
                 
@@ -118,25 +123,27 @@ export function registerSessionTools(server: McpServer): void {
             }
             
             try {
-                // Wrap the code using the template
-                const wrappedCode = SCRIPT_EXECUTE_WRAPPER.replace('{code}', javascript_code);
+                // Create script directly without wrapper - preserves line numbers
+                const script = await session.createScript(javascript_code);
                 
-                const script = await session.createScript(wrappedCode);
+                // Capture messages during execution
+                const logs: string[] = [];
+                let scriptError: { message: string; stack?: string; fileName?: string; lineNumber?: number; columnNumber?: number } | null = null;
                 
-                // Capture messages from the initial execution
-                const initialExecutionResults: any[] = [];
-                
-                const handleMessage = (message: frida.Message, _data: Buffer | null) => {
+                const handleMessage = (message: frida.Message, data: Buffer | null) => {
                     if (message.type === 'send') {
-                        const payload = message.payload as ExecutionReceipt;
-                        if (payload.type === 'execution_receipt') {
-                            initialExecutionResults.push(payload);
-                        }
+                        // Frida sends console.log output here automatically
+                        const payload = message.payload;
+                        logs.push(typeof payload === 'string' ? payload : JSON.stringify(payload));
                     } else if (message.type === 'error') {
-                        initialExecutionResults.push({
-                            script_error: message.description,
-                            details: message
-                        });
+                        // Error messages include correct line numbers
+                        scriptError = {
+                            message: message.description || 'Script error',
+                            stack: message.stack,
+                            fileName: message.fileName,
+                            lineNumber: message.lineNumber,
+                            columnNumber: message.columnNumber
+                        };
                     }
                 };
                 
@@ -147,6 +154,17 @@ export function registerSessionTools(server: McpServer): void {
                         payload: message.type === 'send' ? message.payload : undefined,
                         data: null
                     };
+                    
+                    // Handle error messages with full details
+                    if (message.type === 'error') {
+                        messageData.payload = {
+                            description: message.description,
+                            stack: message.stack,
+                            fileName: message.fileName,
+                            lineNumber: message.lineNumber,
+                            columnNumber: message.columnNumber
+                        };
+                    }
                     
                     // If there's binary data, base64 encode it
                     if (data !== null) {
@@ -177,46 +195,34 @@ export function registerSessionTools(server: McpServer): void {
                 
                 await script.load();
                 
-                // Give a short time for initial results
+                // Give a short time for initial execution
                 if (!keep_alive) {
                     await sleep(200);
                 }
                 
                 // Process results
                 let finalResult: any = {};
-                if (initialExecutionResults.length > 0) {
-                    const receipt = initialExecutionResults[0];
-                    if ('script_error' in receipt) {
-                        finalResult = {
-                            status: 'error',
-                            error: 'Script execution error',
-                            details: receipt.script_error
-                        };
-                    } else if (receipt.error) {
-                        finalResult = {
-                            status: 'error',
-                            error: receipt.error.message,
-                            stack: receipt.error.stack,
-                            initial_logs: receipt.initial_logs || []
-                        };
-                    } else {
-                        finalResult = {
-                            status: 'success',
-                            result: receipt.result,
-                            initial_logs: receipt.initial_logs || []
-                        };
-                    }
+                if (scriptError) {
+                    finalResult = {
+                        status: 'error',
+                        error: scriptError.message,
+                        stack: scriptError.stack,
+                        fileName: scriptError.fileName,
+                        lineNumber: scriptError.lineNumber,
+                        columnNumber: scriptError.columnNumber,
+                        logs
+                    };
                 } else if (keep_alive) {
                     finalResult = {
                         status: 'success',
-                        message: 'Script loaded persistently. Use get_session_messages to retrieve async messages.',
-                        initial_logs: []
+                        message: 'Script loaded persistently. Use frida://sessions/{session_id}/messages to retrieve messages.',
+                        logs
                     };
                 } else {
                     finalResult = {
-                        status: 'nodata',
-                        message: 'Script loaded but sent no initial messages.',
-                        initial_logs: []
+                        status: 'success',
+                        message: 'Script executed successfully.',
+                        logs
                     };
                 }
                 
@@ -225,7 +231,7 @@ export function registerSessionTools(server: McpServer): void {
                     finalResult.script_unloaded = true;
                 } else {
                     finalResult.script_unloaded = false;
-                    finalResult.info = 'Script is persistent. Manage lifecycle if necessary.';
+                    finalResult.info = 'Script is persistent. Messages will be queued.';
                 }
                 
                 return {
@@ -287,25 +293,27 @@ export function registerSessionTools(server: McpServer): void {
                 const fs = await import('fs/promises');
                 const javascriptCode = await fs.readFile(script_path, 'utf-8');
                 
-                // Wrap the code using the template (same as execute_in_session)
-                const wrappedCode = SCRIPT_EXECUTE_WRAPPER.replace('{code}', javascriptCode);
+                // Create script directly without wrapper - preserves line numbers
+                const script = await session.createScript(javascriptCode);
                 
-                const script = await session.createScript(wrappedCode);
+                // Capture messages during execution
+                const logs: string[] = [];
+                let scriptError: { message: string; stack?: string; fileName?: string; lineNumber?: number; columnNumber?: number } | null = null;
                 
-                // Capture messages from the initial execution
-                const initialExecutionResults: any[] = [];
-                
-                const handleMessage = (message: frida.Message, _data: Buffer | null) => {
+                const handleMessage = (message: frida.Message, data: Buffer | null) => {
                     if (message.type === 'send') {
-                        const payload = message.payload as ExecutionReceipt;
-                        if (payload.type === 'execution_receipt') {
-                            initialExecutionResults.push(payload);
-                        }
+                        // Frida sends console.log output here automatically
+                        const payload = message.payload;
+                        logs.push(typeof payload === 'string' ? payload : JSON.stringify(payload));
                     } else if (message.type === 'error') {
-                        initialExecutionResults.push({
-                            script_error: message.description,
-                            details: message
-                        });
+                        // Error messages include correct line numbers
+                        scriptError = {
+                            message: message.description || 'Script error',
+                            stack: message.stack,
+                            fileName: message.fileName,
+                            lineNumber: message.lineNumber,
+                            columnNumber: message.columnNumber
+                        };
                     }
                 };
                 
@@ -316,6 +324,17 @@ export function registerSessionTools(server: McpServer): void {
                         payload: message.type === 'send' ? message.payload : undefined,
                         data: null
                     };
+                    
+                    // Handle error messages with full details
+                    if (message.type === 'error') {
+                        messageData.payload = {
+                            description: message.description,
+                            stack: message.stack,
+                            fileName: message.fileName,
+                            lineNumber: message.lineNumber,
+                            columnNumber: message.columnNumber
+                        };
+                    }
                     
                     // If there's binary data, base64 encode it
                     if (data !== null) {
@@ -346,51 +365,37 @@ export function registerSessionTools(server: McpServer): void {
                 
                 await script.load();
                 
-                // Give a short time for initial results
+                // Give a short time for initial execution
                 if (!keep_alive) {
                     await sleep(200);
                 }
                 
                 // Process results
                 let finalResult: any = {};
-                if (initialExecutionResults.length > 0) {
-                    const receipt = initialExecutionResults[0];
-                    if ('script_error' in receipt) {
-                        finalResult = {
-                            status: 'error',
-                            error: 'Script execution error',
-                            details: receipt.script_error,
-                            script_file: script_path
-                        };
-                    } else if (receipt.error) {
-                        finalResult = {
-                            status: 'error',
-                            error: receipt.error.message,
-                            stack: receipt.error.stack,
-                            initial_logs: receipt.initial_logs || [],
-                            script_file: script_path
-                        };
-                    } else {
-                        finalResult = {
-                            status: 'success',
-                            result: receipt.result,
-                            initial_logs: receipt.initial_logs || [],
-                            script_file: script_path
-                        };
-                    }
+                if (scriptError !== null) {
+                    finalResult = {
+                        status: 'error',
+                        error: scriptError.message,
+                        stack: scriptError.stack,
+                        fileName: scriptError.fileName,
+                        lineNumber: scriptError.lineNumber,
+                        columnNumber: scriptError.columnNumber,
+                        script_file: script_path,
+                        logs
+                    };
                 } else if (keep_alive) {
                     finalResult = {
                         status: 'success',
-                        message: 'Script file loaded persistently. Use get_session_messages to retrieve async messages.',
+                        message: 'Script file loaded persistently. Use frida://sessions/{session_id}/messages to retrieve messages.',
                         script_file: script_path,
-                        initial_logs: []
+                        logs
                     };
                 } else {
                     finalResult = {
-                        status: 'nodata',
-                        message: 'Script loaded but sent no initial messages.',
+                        status: 'success',
+                        message: 'Script file executed successfully.',
                         script_file: script_path,
-                        initial_logs: []
+                        logs
                     };
                 }
                 
@@ -399,7 +404,7 @@ export function registerSessionTools(server: McpServer): void {
                     finalResult.script_unloaded = true;
                 } else {
                     finalResult.script_unloaded = false;
-                    finalResult.info = 'Script is persistent. Manage lifecycle if necessary.';
+                    finalResult.info = 'Script is persistent. Messages will be queued.';
                 }
                 
                 return {

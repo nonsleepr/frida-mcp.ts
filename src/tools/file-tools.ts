@@ -95,33 +95,73 @@ export function registerFileTools(server: McpServer): void {
                 
                 const script = await session.createScript(scriptCode);
                 
-                const results: any[] = [];
-                const chunksData: Buffer[] = [];
+                // Setup streaming file write
+                const path = await import('path');
+                const fs = await import('fs/promises');
+                const fsSync = await import('fs');
+                const outputFile = path.join(process.cwd(), output_path);
+                const dirname = path.dirname(outputFile);
+                if (dirname) {
+                    await fs.mkdir(dirname, { recursive: true });
+                }
+                
+                // Create write stream for efficient memory usage
+                const writeStream = fsSync.createWriteStream(outputFile);
+                
+                let totalBytes = 0;
+                let chunkCount = 0;
+                let fileData: any = null;
+                let streamError: Error | null = null;
+                
+                // Handle stream errors
+                writeStream.on('error', (error) => {
+                    streamError = error;
+                });
                 
                 script.message.connect((message: frida.Message, data: Buffer | null) => {
                     if (message.type === 'send') {
                         const payload = message.payload;
                         if (payload.type === 'chunk' && data) {
-                            chunksData.push(data);
-                        } else if (payload.type === 'complete' || payload.type === 'error') {
-                            results.push(payload);
+                            // Stream chunk directly to disk - no memory accumulation
+                            writeStream.write(data);
+                            totalBytes += data.length;
+                            chunkCount++;
+                        } else if (payload.type === 'complete') {
+                            writeStream.end();
+                            fileData = payload;
+                        } else if (payload.type === 'error') {
+                            writeStream.end();
+                            fileData = payload;
                         }
                     }
                 });
                 
                 await script.load();
                 
-                // Wait for file reading (max 60 seconds for large files)
-                const maxWait = 60000; // 60 seconds in ms
+                // Wait for file transfer completion (max 60 seconds)
+                const maxWait = 60000;
                 const startTime = Date.now();
-                while (results.length === 0 && (Date.now() - startTime) < maxWait) {
+                while (fileData === null && (Date.now() - startTime) < maxWait && !streamError) {
                     await sleep(500);
                 }
                 
                 await script.unload();
                 await session.detach();
                 
-                if (results.length === 0) {
+                // Check for stream errors
+                if (streamError) {
+                    const result = {
+                        status: 'error',
+                        error: `File write error: ${streamError.message}`
+                    };
+                    
+                    return {
+                        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+                        structuredContent: result
+                    };
+                }
+                
+                if (fileData === null) {
                     const result = {
                         status: 'error',
                         error: 'Timeout waiting for file download'
@@ -133,8 +173,6 @@ export function registerFileTools(server: McpServer): void {
                     };
                 }
                 
-                const fileData = results[0];
-                
                 if (fileData.status === 'error') {
                     return {
                         content: [{ type: 'text', text: JSON.stringify(fileData, null, 2) }],
@@ -142,24 +180,13 @@ export function registerFileTools(server: McpServer): void {
                     };
                 }
                 
-                // Write the file from raw chunks
-                const path = await import('path');
-                const fs = await import('fs/promises');
-                const outputFile = path.join(process.cwd(), output_path);
-                const dirname = path.dirname(outputFile);
-                if (dirname) {
-                    await fs.mkdir(dirname, { recursive: true });
-                }
-                
-                await fs.writeFile(outputFile, Buffer.concat(chunksData));
-                
                 const result = {
                     status: 'success',
                     remote_path: file_path,
                     local_path: outputFile,
-                    size_bytes: fileData.totalSize,
-                    chunks: fileData.chunkCount,
-                    message: `Successfully downloaded ${fileData.totalSize} bytes`
+                    size_bytes: totalBytes,
+                    chunks: chunkCount,
+                    message: `Successfully streamed ${totalBytes} bytes in ${chunkCount} chunks`
                 };
                 
                 return {

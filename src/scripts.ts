@@ -19,52 +19,10 @@ send({
 `;
 
 /**
- * Template wrapper for executing JavaScript code with console.log capture
- * The {code} placeholder will be replaced with actual JavaScript code
+ * REMOVED: Script wrapper is no longer used.
+ * Scripts now execute directly without wrapping to preserve correct line numbers.
+ * Frida natively captures console.log output through its message system.
  */
-export const SCRIPT_EXECUTE_WRAPPER = `
-(function() {
-    var initialLogs = [];
-    var originalLog = console.log;
-    var isInitialExecution = true;
-    
-    // Intercept console.log to capture output
-    console.log = function() {
-        var args = Array.prototype.slice.call(arguments);
-        var logMsg = args.map(function(arg) {
-            return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
-        }).join(' ');
-        
-        if (isInitialExecution) {
-            initialLogs.push(logMsg);
-        } else {
-            // For persistent scripts, send console.log as messages
-            send({ type: 'log', message: logMsg });
-        }
-        
-        originalLog.apply(console, arguments);
-    };
-    
-    var scriptResult;
-    var scriptError;
-    try {
-        {code}
-    } catch (e) {
-        scriptError = { message: e.toString(), stack: e.stack };
-    }
-    
-    // Mark that initial execution is complete
-    isInitialExecution = false;
-    
-    // Send execution receipt back to TypeScript
-    send({
-        type: 'execution_receipt',
-        result: scriptError ? undefined : (scriptResult !== undefined ? scriptResult.toString() : 'undefined'),
-        error: scriptError,
-        initial_logs: initialLogs
-    });
-})();
-`;
 
 /**
  * Template for reading files in chunks

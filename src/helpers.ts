@@ -142,25 +142,23 @@ export function cleanupSession(sessionId: string): void {
 
 /**
  * Retrieve and clear messages from persistent scripts.
- * 
+ * Event-driven approach - returns immediately with available messages.
+ * No polling needed since messages are captured in real-time by handlers.
+ *
  * @param sessionId - Session ID to retrieve messages from
- * @param timeout - Maximum milliseconds to wait for messages (default: 5000ms)
  * @returns Object with status and messages list
  */
-export async function getSessionMessagesAsync(
-    sessionId: string,
-    timeout: number = 5000
-): Promise<{
+export function getSessionMessages(
+    sessionId: string
+): {
     status: string;
     session_id?: string;
     messages?: ScriptMessage[];
     messages_retrieved?: number;
-    elapsed_seconds?: number;
     error?: string;
     info?: string;
-}> {
+} {
     logger.info(`Retrieving messages for session ${sessionId}`);
-    const startTime = Date.now();
     
     try {
         // Validation checks
@@ -191,45 +189,24 @@ export async function getSessionMessagesAsync(
             };
         }
         
-        const messages: ScriptMessage[] = [];
-        const deadline = Date.now() + timeout;
+        // Drain the queue immediately - messages are captured in real-time
+        const messages = messageQueue.splice(0, messageQueue.length);
         
-        // Collect all available messages with timeout
-        while (Date.now() < deadline) {
-            const remaining = deadline - Date.now();
-            if (remaining <= 0) {
-                break;
-            }
-            
-            // Since we're using an array-based queue, just drain it
-            if (messageQueue.length > 0) {
-                messages.push(...messageQueue.splice(0, messageQueue.length));
-                break;
-            }
-            
-            // Small delay before checking again
-            await sleep(Math.min(100, remaining));
-        }
-        
-        const elapsed = (Date.now() - startTime) / 1000;
-        logger.info(`Retrieved ${messages.length} messages in ${elapsed.toFixed(3)}s`);
+        logger.info(`Retrieved ${messages.length} messages`);
         
         return {
             status: 'success',
             session_id: sessionId,
             messages,
-            messages_retrieved: messages.length,
-            elapsed_seconds: Math.round(elapsed * 1000) / 1000
+            messages_retrieved: messages.length
         };
         
     } catch (error) {
-        const elapsed = (Date.now() - startTime) / 1000;
         logger.error(`Exception retrieving messages: ${error}`);
         return {
             status: 'error',
             error: `Failed to retrieve messages: ${error instanceof Error ? error.message : String(error)}`,
-            session_id: sessionId,
-            elapsed_seconds: Math.round(elapsed * 1000) / 1000
+            session_id: sessionId
         };
     }
 }

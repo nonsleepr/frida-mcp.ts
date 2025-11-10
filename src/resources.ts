@@ -6,7 +6,7 @@
 import * as frida from 'frida';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getDevice, getSessionMessagesAsync, cleanupSession } from './helpers.js';
+import { getDevice, getSessionMessages, cleanupSession } from './helpers.js';
 import { logger } from './logger.js';
 import { sessions, scripts, scriptMessages } from './state.js';
 import type { SessionInfo } from './types.js';
@@ -428,14 +428,9 @@ export function registerResources(server: McpServer): void {
                     logger.warning(`Session ${sessionIdStr} not in sessions dict`);
                 }
                 
-                // Use the async function with timeout protection (50s to leave margin)
-                logger.debug('Calling getSessionMessagesAsync with 50s timeout');
-                const result = await Promise.race([
-                    getSessionMessagesAsync(sessionIdStr, 50000),
-                    new Promise<any>((_, reject) => 
-                        setTimeout(() => reject(new Error('Timeout')), 55000)
-                    )
-                ]);
+                // Get messages immediately (event-driven, no polling)
+                logger.debug('Retrieving session messages');
+                const result = getSessionMessages(sessionIdStr);
                 
                 // Apply limit if specified
                 if (result.status === 'success' && result.messages && limit !== undefined) {
@@ -537,14 +532,9 @@ export function registerResources(server: McpServer): void {
                     logger.warning(`Session ${sessionIdStr} not in sessions dict`);
                 }
                 
-                // Use the async function with timeout protection (50s to leave margin)
-                logger.debug('Calling getSessionMessagesAsync with 50s timeout');
-                const result = await Promise.race([
-                    getSessionMessagesAsync(sessionIdStr, 50000),
-                    new Promise<any>((_, reject) =>
-                        setTimeout(() => reject(new Error('Timeout')), 55000)
-                    )
-                ]);
+                // Get messages immediately (event-driven, no polling)
+                logger.debug('Retrieving session messages');
+                const result = getSessionMessages(sessionIdStr);
                 
                 // Apply limit if specified
                 if (result.status === 'success' && result.messages && limit !== undefined) {

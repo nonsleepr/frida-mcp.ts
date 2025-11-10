@@ -26,15 +26,10 @@ export interface ScriptMessage {
     data?: string | null;  // base64 encoded binary data
 }
 
-export interface ExecutionReceipt {
-    type: 'execution_receipt';
-    result?: string;
-    error?: {
-        message: string;
-        stack?: string;
-    };
-    initial_logs: string[];
-}
+/**
+ * REMOVED: ExecutionReceipt is no longer used.
+ * Scripts now execute directly and use Frida's native error reporting.
+ */
 
 export interface SessionInfo {
     session_id: string;
