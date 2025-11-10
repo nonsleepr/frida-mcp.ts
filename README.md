@@ -19,7 +19,7 @@ A MCP server that provides dynamic instrumentation capabilities through Frida. B
 
 ## Installation
 
-No installation required! Use `bunx` to run directly from GitHub (see Configuration below).
+No installation required! Use `npx` to run directly from GitHub (see Configuration below).
 
 For local development:
 ```bash
@@ -30,6 +30,8 @@ cd frida-mcp.ts
 # Install dependencies
 bun install
 ```
+
+**Note:** While this project is built with Bun, `npx` (from npm) is required to run from GitHub due to native dependency requirements. Use `npx --yes github:nonsleepr/frida-mcp.ts` to run the server.
 
 ## Configuration
 
@@ -49,8 +51,8 @@ Add to your Claude Desktop config file:
 {
   "mcpServers": {
     "frida": {
-      "command": "bunx",
-      "args": ["--bun", "github:nonsleepr/frida-mcp.ts"],
+      "command": "npx",
+      "args": ["--yes", "github:nonsleepr/frida-mcp.ts"],
       "env": {
         "FRIDA_REMOTE_HOST": "192.168.1.100",
         "FRIDA_REMOTE_PORT": "27042"
@@ -68,8 +70,8 @@ Add this to your project's `.roo/mcp.json`:
 {
   "mcpServers": {
     "frida": {
-      "command": "bunx",
-      "args": ["--bun", "github:nonsleepr/frida-mcp.ts"],
+      "command": "npx",
+      "args": ["--yes", "github:nonsleepr/frida-mcp.ts"],
       "env": {
         "FRIDA_REMOTE_HOST": "192.168.1.100",
         "FRIDA_REMOTE_PORT": "27042"
