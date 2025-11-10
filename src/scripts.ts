@@ -26,6 +26,7 @@ export const SCRIPT_EXECUTE_WRAPPER = `
 (function() {
     var initialLogs = [];
     var originalLog = console.log;
+    var isInitialExecution = true;
     
     // Intercept console.log to capture output
     console.log = function() {
@@ -33,7 +34,14 @@ export const SCRIPT_EXECUTE_WRAPPER = `
         var logMsg = args.map(function(arg) {
             return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
         }).join(' ');
-        initialLogs.push(logMsg);
+        
+        if (isInitialExecution) {
+            initialLogs.push(logMsg);
+        } else {
+            // For persistent scripts, send console.log as messages
+            send({ type: 'log', message: logMsg });
+        }
+        
         originalLog.apply(console, arguments);
     };
     
@@ -45,8 +53,8 @@ export const SCRIPT_EXECUTE_WRAPPER = `
         scriptError = { message: e.toString(), stack: e.stack };
     }
     
-    // Restore console.log
-    console.log = originalLog;
+    // Mark that initial execution is complete
+    isInitialExecution = false;
     
     // Send execution receipt back to TypeScript
     send({

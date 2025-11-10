@@ -384,29 +384,124 @@ export function registerResources(server: McpServer): void {
         }
     );
     
-    // Session messages resource template with optional limit
+    // Session messages resource template (base - default 100 limit)
     server.registerResource(
         'session-messages',
         new ResourceTemplate('frida://sessions/{sessionId}/messages', { list: undefined }),
         {
             name: 'Session Messages',
-            description: 'Retrieve messages from persistent scripts. Append /last:N to limit results (e.g., /last:10 for last 10 messages) or /all for unlimited. Default limit is 100 messages. Messages are consumed when retrieved.',
+            description: 'Retrieve messages from persistent scripts with default 100 message limit. Messages are consumed when retrieved.',
             mimeType: 'application/json'
         },
         async (uri, { sessionId }) => {
             const sessionIdStr = String(sessionId || '');
+            const limit: number | undefined = 100; // Default limit
+            
+            logger.info(`Message retrieval requested for session ${sessionIdStr}, limit=${limit || 'unlimited'}`);
+            const startTime = Date.now();
+            
+            try {
+                // Validate session exists and is alive
+                const session = sessions.get(sessionIdStr);
+                if (session) {
+                    const isDetached = session.isDetached();
+                    logger.debug(`Session found, is_detached=${isDetached}`);
+                    if (isDetached) {
+                        logger.warning(`Session ${sessionIdStr} is detached, cleaning up`);
+                        cleanupSession(sessionIdStr);
+                        
+                        const result = {
+                            status: 'error',
+                            error: `Session ${sessionIdStr} is detached and has been cleaned up`,
+                            session_id: sessionIdStr
+                        };
+                        
+                        return {
+                            contents: [{
+                                uri: uri.href,
+                                text: JSON.stringify(result, null, 2),
+                                mimeType: 'application/json'
+                            }]
+                        };
+                    }
+                } else {
+                    logger.warning(`Session ${sessionIdStr} not in sessions dict`);
+                }
+                
+                // Use the async function with timeout protection (50s to leave margin)
+                logger.debug('Calling getSessionMessagesAsync with 50s timeout');
+                const result = await Promise.race([
+                    getSessionMessagesAsync(sessionIdStr, 50000),
+                    new Promise<any>((_, reject) => 
+                        setTimeout(() => reject(new Error('Timeout')), 55000)
+                    )
+                ]);
+                
+                // Apply limit if specified
+                if (result.status === 'success' && result.messages && limit !== undefined) {
+                    const originalCount = result.messages.length;
+                    result.messages = result.messages.slice(-limit);
+                    result.messages_retrieved = result.messages.length;
+                    if (result.messages.length < originalCount) {
+                        result.info = `Retrieved last ${result.messages.length} of ${originalCount} available messages`;
+                    }
+                }
+                
+                const elapsed = (Date.now() - startTime) / 1000;
+                logger.info(`Success in ${elapsed.toFixed(3)}s, returning ${result.messages_retrieved || 0} messages`);
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(result, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+                
+            } catch (error) {
+                const elapsed = (Date.now() - startTime) / 1000;
+                logger.error(`Exception after ${elapsed.toFixed(3)}s: ${error}`);
+                
+                const result = {
+                    status: 'error',
+                    error: `Failed to retrieve messages: ${error instanceof Error ? error.message : String(error)}`,
+                    session_id: sessionIdStr,
+                    elapsed_seconds: Math.round(elapsed * 1000) / 1000
+                };
+                
+                return {
+                    contents: [{
+                        uri: uri.href,
+                        text: JSON.stringify(result, null, 2),
+                        mimeType: 'application/json'
+                    }]
+                };
+            }
+        }
+    );
+    
+    // Session messages resource template with limit parameter
+    server.registerResource(
+        'session-messages-with-limit',
+        new ResourceTemplate('frida://sessions/{sessionId}/messages/{limit}', { list: undefined }),
+        {
+            name: 'Session Messages',
+            description: 'Retrieve messages from persistent scripts. Use /last:N to limit results (e.g., /last:10 for last 10 messages) or /all for unlimited. Messages are consumed when retrieved.',
+            mimeType: 'application/json'
+        },
+        async (uri, { sessionId, limit: limitParam }) => {
+            const sessionIdStr = String(sessionId || '');
             let limit: number | undefined = 100; // Default limit
             
-            // Check for limit parameter in URI path
-            const pathParts = uri.pathname.split('/').filter(Boolean);
-            if (pathParts[3]) {
-                const limitPart = pathParts[3];
-                if (limitPart.startsWith('last:')) {
-                    const limitValue = parseInt(limitPart.substring(5), 10);
+            // Parse limit parameter
+            if (limitParam) {
+                const limitStr = String(limitParam);
+                if (limitStr.startsWith('last:')) {
+                    const limitValue = parseInt(limitStr.substring(5), 10);
                     if (!isNaN(limitValue) && limitValue > 0) {
                         limit = limitValue;
                     }
-                } else if (limitPart === 'all') {
+                } else if (limitStr === 'all') {
                     limit = undefined; // No limit
                 }
             }
@@ -446,7 +541,7 @@ export function registerResources(server: McpServer): void {
                 logger.debug('Calling getSessionMessagesAsync with 50s timeout');
                 const result = await Promise.race([
                     getSessionMessagesAsync(sessionIdStr, 50000),
-                    new Promise<any>((_, reject) => 
+                    new Promise<any>((_, reject) =>
                         setTimeout(() => reject(new Error('Timeout')), 55000)
                     )
                 ]);

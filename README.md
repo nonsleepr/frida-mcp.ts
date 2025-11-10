@@ -129,4 +129,5 @@ Resources provide real-time, read-only access to Frida state via URI.
 | `frida://devices/{device_id}/processes` | List processes on a specific Frida device. Use "local", "usb", or "remote" for automatic device selection, provide a specific device ID, or use a connection string (hostname:port or hostname). |
 | `frida://devices/{device_id}/processes/by-name/{process_name}` | Find a process by name (case-insensitive partial match) on a specific device. Supports connection strings (hostname:port or hostname). |
 | `frida://devices/{device_id}/processes/{pid}/module` | Get main module information for a process (path, base address, size). Supports connection strings (hostname:port or hostname). |
-| `frida://sessions/{sessionId}/messages` | Retrieve messages from persistent scripts. Append `/last:N` to limit results (e.g., `/last:10` for last 10 messages) or `/all` for unlimited. Default limit is 100 messages. Messages are consumed when retrieved. |
+| `frida://sessions/{sessionId}/messages` | Retrieve messages from persistent scripts with default 100 message limit. Messages are consumed when retrieved. |
+| `frida://sessions/{sessionId}/messages/{limit}` | Retrieve messages from persistent scripts with custom limit. Use `/last:N` (e.g., `/last:10` for last 10 messages) or `/all` for unlimited. Messages are consumed when retrieved. |
