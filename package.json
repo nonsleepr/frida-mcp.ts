@@ -14,7 +14,6 @@
     "start:sse": "bun run src/index.ts --transport sse --host 127.0.0.1 --port 8000",
     "dev": "bun --watch src/index.ts",
     "build": "bun build src/index.ts --outfile dist/index.js --target bun",
-    "prepare": "bun run build",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf dist node_modules"
   },
