@@ -6,7 +6,7 @@
   "main": "./src/index.ts",
   "module": "./src/index.ts",
   "bin": {
-    "frida-mcp": "./dist/index.js"
+    "frida-mcp": "./src/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.ts",
