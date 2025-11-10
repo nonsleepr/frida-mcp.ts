@@ -19,6 +19,9 @@ A MCP server that provides dynamic instrumentation capabilities through Frida. B
 
 ## Installation
 
+No installation required! Use `bunx` to run directly from GitHub (see Configuration below).
+
+For local development:
 ```bash
 # Clone the repository
 git clone https://github.com/nonsleepr/frida-mcp.ts
@@ -39,15 +42,19 @@ bun install
 
 Add to your Claude Desktop config file:
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
     "frida": {
-      "command": "bun",
-      "args": ["run", "/path/to/frida-mcp.ts/src/index.ts"]
+      "command": "bunx",
+      "args": ["--bun", "github:nonsleepr/frida-mcp.ts"],
+      "env": {
+        "FRIDA_REMOTE_HOST": "192.168.1.100",
+        "FRIDA_REMOTE_PORT": "27042"
+      }
     }
   }
 }
@@ -55,17 +62,16 @@ Add to your Claude Desktop config file:
 
 ### Roo Configuration
 
-This project includes a pre-configured `.roo/mcp.json` file for project-level MCP server configuration. The configuration is automatically available when you open this project in VS Code with Roo installed.
+Add this to your project's `.roo/mcp.json`:
 
-**Project Configuration (`.roo/mcp.json`):**
 ```json
 {
   "mcpServers": {
     "frida": {
-      "command": "bun",
-      "args": ["run", "src/index.ts"],
+      "command": "bunx",
+      "args": ["--bun", "github:nonsleepr/frida-mcp.ts"],
       "env": {
-        "FRIDA_REMOTE_HOST": "",
+        "FRIDA_REMOTE_HOST": "192.168.1.100",
         "FRIDA_REMOTE_PORT": "27042"
       },
       "disabled": false,
@@ -75,14 +81,7 @@ This project includes a pre-configured `.roo/mcp.json` file for project-level MC
 }
 ```
 
-**To use with a remote Frida device:**
-Edit `.roo/mcp.json` and set the `FRIDA_REMOTE_HOST` environment variable:
-```json
-"env": {
-  "FRIDA_REMOTE_HOST": "192.168.1.100",
-  "FRIDA_REMOTE_PORT": "27042"
-}
-```
+**Note**: Set `FRIDA_REMOTE_HOST` to your Frida server's IP address, or leave it empty to use local devices.
 
 ## Available Tools
 
