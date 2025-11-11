@@ -10,6 +10,7 @@ import { getDevice, generateSessionId, sleep, cleanupSession } from '../helpers.
 import { logger } from '../logger.js';
 import { sessions, scripts, scriptMessages } from '../state.js';
 import type { ScriptMessage } from '../types.js';
+import { CONSOLE_INTERCEPTOR } from '../scripts.js';
 
 /**
  * Register session management tools with the MCP server
@@ -122,17 +123,21 @@ export function registerSessionTools(server: McpServer): void {
             }
             
             try {
-                // Create script directly without wrapper - preserves line numbers
-                const script = await session.createScript(javascript_code);
+                // Prepend console interceptor to preserve console.log output
+                // The interceptor adds 2 lines (interceptor + sourceURL comment)
+                const LINE_OFFSET = 2;
+                const wrappedCode = `${CONSOLE_INTERCEPTOR}\n//# sourceURL=user-script.js\n${javascript_code}`;
+                const script = await session.createScript(wrappedCode);
                 
-                // Capture initial logs if wait > 0
-                const logs: string[] = [];
+                // Capture initial logs - always capture, not just when wait > 0
+                const logs: any[] = [];
+                let initialCollectionDone = false;
                 
                 const handlePersistentMessage = (message: frida.Message, data: Buffer | null) => {
-                    // Capture initial logs during wait period
-                    if (wait > 0 && message.type === 'send') {
+                    // Capture logs before initial collection is done
+                    if (!initialCollectionDone && message.type === 'send') {
                         const payload = message.payload;
-                        logs.push(typeof payload === 'string' ? payload : JSON.stringify(payload));
+                        logs.push(payload);
                     }
                     
                     // Handle binary data serialization
@@ -142,13 +147,14 @@ export function registerSessionTools(server: McpServer): void {
                         data: null
                     };
                     
-                    // Handle error messages with full details
+                    // Handle error messages with full details and adjust line numbers
                     if (message.type === 'error') {
+                        const adjustedLineNumber = message.lineNumber ? message.lineNumber - LINE_OFFSET : undefined;
                         messageData.payload = {
                             description: message.description,
                             stack: message.stack,
                             fileName: message.fileName,
-                            lineNumber: message.lineNumber,
+                            lineNumber: adjustedLineNumber,
                             columnNumber: message.columnNumber
                         };
                     }
@@ -181,10 +187,16 @@ export function registerSessionTools(server: McpServer): void {
                 
                 await script.load();
                 
-                // Wait for initial output if requested
+                // Wait for initial output if requested, or small delay to capture immediate messages
                 if (wait > 0) {
                     await sleep(wait * 1000);
+                } else {
+                    // Give a small window to capture synchronous messages
+                    await sleep(100);
                 }
+                
+                // Mark initial collection as done
+                initialCollectionDone = true;
                 
                 // Build response
                 const finalResult: any = {
@@ -255,17 +267,21 @@ export function registerSessionTools(server: McpServer): void {
                 const fs = await import('fs/promises');
                 const javascriptCode = await fs.readFile(script_path, 'utf-8');
                 
-                // Create script directly without wrapper - preserves line numbers
-                const script = await session.createScript(javascriptCode);
+                // Prepend console interceptor to preserve console.log output
+                // The interceptor adds 2 lines (interceptor + sourceURL comment)
+                const LINE_OFFSET = 2;
+                const wrappedCode = `${CONSOLE_INTERCEPTOR}\n//# sourceURL=${script_path}\n${javascriptCode}`;
+                const script = await session.createScript(wrappedCode);
                 
-                // Capture initial logs if wait > 0
-                const logs: string[] = [];
+                // Capture initial logs - always capture, not just when wait > 0
+                const logs: any[] = [];
+                let initialCollectionDone = false;
                 
                 const handlePersistentMessage = (message: frida.Message, data: Buffer | null) => {
-                    // Capture initial logs during wait period
-                    if (wait > 0 && message.type === 'send') {
+                    // Capture logs before initial collection is done
+                    if (!initialCollectionDone && message.type === 'send') {
                         const payload = message.payload;
-                        logs.push(typeof payload === 'string' ? payload : JSON.stringify(payload));
+                        logs.push(payload);
                     }
                     
                     // Handle binary data serialization
@@ -275,13 +291,14 @@ export function registerSessionTools(server: McpServer): void {
                         data: null
                     };
                     
-                    // Handle error messages with full details
+                    // Handle error messages with full details and adjust line numbers
                     if (message.type === 'error') {
+                        const adjustedLineNumber = message.lineNumber ? message.lineNumber - LINE_OFFSET : undefined;
                         messageData.payload = {
                             description: message.description,
                             stack: message.stack,
                             fileName: message.fileName,
-                            lineNumber: message.lineNumber,
+                            lineNumber: adjustedLineNumber,
                             columnNumber: message.columnNumber
                         };
                     }
@@ -314,10 +331,16 @@ export function registerSessionTools(server: McpServer): void {
                 
                 await script.load();
                 
-                // Wait for initial output if requested
+                // Wait for initial output if requested, or small delay to capture immediate messages
                 if (wait > 0) {
                     await sleep(wait * 1000);
+                } else {
+                    // Give a small window to capture synchronous messages
+                    await sleep(100);
                 }
+                
+                // Mark initial collection as done
+                initialCollectionDone = true;
                 
                 // Build response
                 const finalResult: any = {

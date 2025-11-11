@@ -21,8 +21,17 @@ send({
 /**
  * REMOVED: Script wrapper is no longer used.
  * Scripts now execute directly without wrapping to preserve correct line numbers.
- * Frida natively captures console.log output through its message system.
+ *
+ * Console interception is now handled by a separate persistent script loaded
+ * at session creation to avoid affecting user script line numbers.
  */
+
+/**
+ * Console interceptor script that captures console.* output via send()
+ * Compact single-line version to minimize impact on line numbers.
+ * Returns objects as-is without stringification for better structure preservation.
+ */
+export const CONSOLE_INTERCEPTOR = `(function(){var methods=['log','error','warn','info','debug'];methods.forEach(function(method){var original=console[method];console[method]=function(){var args=Array.prototype.slice.call(arguments);if(args.length===1){send({type:'console.'+method,message:args[0]});}else if(args.length>1){send({type:'console.'+method,message:args});}original.apply(console,arguments);};});})();`;
 
 /**
  * Template for reading files in chunks
