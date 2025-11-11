@@ -53,7 +53,7 @@ export function registerResources(server: McpServer): void {
             mimeType: 'application/json'
         },
         async (uri, { device_id }) => {
-            const deviceIdParam = String(device_id || '');
+            const deviceIdParam = decodeURIComponent(String(device_id || ''));
             
             // Map special keywords to device selection
             let deviceId: string | undefined;
@@ -155,14 +155,23 @@ export function registerResources(server: McpServer): void {
         new ResourceTemplate('frida://devices/{device_id}', { list: undefined }),
         {
             name: 'Device Info',
-            description: 'Get detailed information about a specific device by ID',
+            description: 'Get detailed information about a specific device by ID or connection string (hostname:port or hostname)',
             mimeType: 'application/json'
         },
         async (uri, { device_id }) => {
-            const deviceId = String(device_id || '');
+            const deviceIdParam = decodeURIComponent(String(device_id || ''));
+            
+            // Map special keywords to device selection
+            let deviceId: string | undefined;
+            if (deviceIdParam === 'default' || deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
+                deviceId = deviceIdParam;
+            } else {
+                // Pass through - getDevice will handle connection strings
+                deviceId = deviceIdParam;
+            }
             
             try {
-                const device = await frida.getDevice(deviceId);
+                const device = await getDevice(deviceId);
                 const result = {
                     id: device.id,
                     name: device.name,
@@ -178,8 +187,8 @@ export function registerResources(server: McpServer): void {
                 };
             } catch (error) {
                 const errorResult = {
-                    error: `Device with ID ${deviceId} not found`,
-                    device_id: deviceId
+                    error: `Failed to get device info: ${error instanceof Error ? error.message : String(error)}`,
+                    device_id: deviceIdParam
                 };
                 
                 return {
@@ -203,7 +212,7 @@ export function registerResources(server: McpServer): void {
             mimeType: 'application/json'
         },
         async (uri, { device_id, process_name }) => {
-            const deviceIdParam = String(device_id || '');
+            const deviceIdParam = decodeURIComponent(String(device_id || ''));
             const processName = decodeURIComponent(String(process_name || ''));
             
             // Map special keywords to device selection
@@ -280,8 +289,8 @@ export function registerResources(server: McpServer): void {
             mimeType: 'application/json'
         },
         async (uri, { device_id, pid }) => {
-            const deviceIdParam = String(device_id || '');
-            const pidStr = String(pid || '');
+            const deviceIdParam = decodeURIComponent(String(device_id || ''));
+            const pidStr = decodeURIComponent(String(pid || ''));
             const pidNum = parseInt(pidStr, 10);
             
             if (isNaN(pidNum)) {
@@ -394,7 +403,7 @@ export function registerResources(server: McpServer): void {
             mimeType: 'application/json'
         },
         async (uri, { sessionId }) => {
-            const sessionIdStr = String(sessionId || '');
+            const sessionIdStr = decodeURIComponent(String(sessionId || ''));
             const limit: number | undefined = 100; // Default limit
             
             logger.info(`Message retrieval requested for session ${sessionIdStr}, limit=${limit || 'unlimited'}`);
@@ -485,12 +494,12 @@ export function registerResources(server: McpServer): void {
             mimeType: 'application/json'
         },
         async (uri, { sessionId, limit: limitParam }) => {
-            const sessionIdStr = String(sessionId || '');
+            const sessionIdStr = decodeURIComponent(String(sessionId || ''));
             let limit: number | undefined = 100; // Default limit
             
             // Parse limit parameter
             if (limitParam) {
-                const limitStr = String(limitParam);
+                const limitStr = decodeURIComponent(String(limitParam));
                 if (limitStr.startsWith('last:')) {
                     const limitValue = parseInt(limitStr.substring(5), 10);
                     if (!isNaN(limitValue) && limitValue > 0) {
