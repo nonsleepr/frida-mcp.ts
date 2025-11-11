@@ -84,11 +84,10 @@ Add this to your project's `.roo/mcp.json`:
 
 ## Available Tools
 
-### Device & Process Management
+### Process Management
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `attach_to_process` | Attach to a running process by PID. Returns attachment status without creating a persistent session. Use `create_interactive_session` for session-based instrumentation. | `pid` (number)<br>`device_id` (optional: "default", "local", "usb", "remote", device ID, or connection string hostname:port) |
 | `spawn_process` | Spawn a process with Frida attached in paused state. The process will be paused at startup. Use `resume_process()` after loading scripts to continue execution. | `program` (string)<br>`args` (optional string[])<br>`device_id` (optional: "default" or connection string) |
 | `resume_process` | Resume a spawned process. | `pid` (number)<br>`device_id` (optional: "default" or connection string) |
 | `kill_process` | Kill a process by PID. | `pid` (number)<br>`device_id` (optional: "default" or connection string) |
