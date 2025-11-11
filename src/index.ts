@@ -17,8 +17,7 @@
  *     bun run src/index.ts --transport sse --host 127.0.0.1 --port 8000
  *     
  * Environment variables:
- *     FRIDA_REMOTE_HOST: Remote Frida server host (e.g., "192.168.1.100")
- *     FRIDA_REMOTE_PORT: Remote Frida server port (default: 27042)
+ *     FRIDA_DEFAULT_DEVICE: Default remote device connection string (e.g., "192.168.1.100:27042" or "192.168.1.100")
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

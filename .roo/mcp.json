@@ -7,8 +7,7 @@
         "src/index.ts"
       ],
       "env": {
-        "FRIDA_REMOTE_HOST": "",
-        "FRIDA_REMOTE_PORT": "27042"
+        "FRIDA_DEFAULT_DEVICE": "192.168.0.100:27042"
       },
       "disabled": false,
       "alwaysAllow": [

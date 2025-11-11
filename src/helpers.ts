@@ -12,9 +12,10 @@ import type { ScriptMessage } from './types.js';
  *
  * Device selection priority:
  * 1. If device_id is specified:
+ *    - "default" keyword uses FRIDA_DEFAULT_DEVICE or falls back to auto-detection
  *    - Connection strings (hostname:port or hostname) are added as remote devices
- *    - Standard device IDs ("local", "usb", etc.) are resolved via getDevice()
- * 2. If FRIDA_REMOTE_HOST env var is set, use remote device
+ *    - Standard device IDs ("local", "usb", "remote") are resolved via getDevice()
+ * 2. If FRIDA_DEFAULT_DEVICE env var is set, use remote device
  * 3. Try USB device (for mobile device debugging)
  * 4. Fall back to local device (for local process instrumentation)
  *
@@ -22,15 +23,39 @@ import type { ScriptMessage } from './types.js';
  * @returns The selected Frida device
  *
  * Environment Variables:
- *     FRIDA_REMOTE_HOST: Remote Frida server hostname/IP
- *     FRIDA_REMOTE_PORT: Remote Frida server port (default: 27042)
+ *     FRIDA_DEFAULT_DEVICE: Default remote device connection string (hostname:port or hostname, port defaults to 27042)
  */
 export async function getDevice(deviceId?: string): Promise<frida.Device> {
     // Priority 1: Explicit device ID provided
     if (deviceId) {
+        // Handle "default" keyword - use FRIDA_DEFAULT_DEVICE or fall back to auto-detection
+        if (deviceId.toLowerCase() === 'default') {
+            const defaultDevice = process.env.FRIDA_DEFAULT_DEVICE;
+            if (defaultDevice) {
+                // Parse connection string (hostname:port or hostname)
+                try {
+                    const url = new URL(`tcp://${defaultDevice}`);
+                    const host = url.hostname;
+                    const port = url.port ? parseInt(url.port, 10) : 27042;
+                    
+                    if (host) {
+                        const remoteAddress = `${host}:${port}`;
+                        logger.info(`Using default device: ${remoteAddress}`);
+                        const deviceManager = frida.getDeviceManager();
+                        return await deviceManager.addRemoteDevice(remoteAddress);
+                    }
+                } catch {
+                    // Invalid format, fall through
+                }
+            }
+            
+            // If no env vars, fall through to auto-detection (Priority 3 & 4)
+            deviceId = undefined;
+        }
+        
         // Check if it's a connection string by attempting to parse as URL
         // Skip standard device keywords
-        if (!['local', 'usb', 'remote'].includes(deviceId.toLowerCase())) {
+        if (deviceId && !['local', 'usb', 'remote'].includes(deviceId.toLowerCase())) {
             try {
                 // Try parsing as URL with dummy protocol
                 const url = new URL(`tcp://${deviceId}`);
@@ -49,18 +74,30 @@ export async function getDevice(deviceId?: string): Promise<frida.Device> {
             }
         }
         
-        // Standard device ID
-        return await frida.getDevice(deviceId);
+        // Standard device ID (if still set)
+        if (deviceId) {
+            return await frida.getDevice(deviceId);
+        }
     }
     
     // Priority 2: Remote device via environment variables
-    const remoteHost = process.env.FRIDA_REMOTE_HOST;
-    if (remoteHost) {
-        const remotePort = parseInt(process.env.FRIDA_REMOTE_PORT || '27042', 10);
-        const deviceManager = frida.getDeviceManager();
-        const remoteAddress = `${remoteHost}:${remotePort}`;
-        logger.info(`Using remote device: ${remoteAddress}`);
-        return await deviceManager.addRemoteDevice(remoteAddress);
+    const defaultDevice = process.env.FRIDA_DEFAULT_DEVICE;
+    if (defaultDevice) {
+        // Parse connection string (hostname:port or hostname)
+        try {
+            const url = new URL(`tcp://${defaultDevice}`);
+            const host = url.hostname;
+            const port = url.port ? parseInt(url.port, 10) : 27042;
+            
+            if (host) {
+                const remoteAddress = `${host}:${port}`;
+                logger.info(`Using default device from env: ${remoteAddress}`);
+                const deviceManager = frida.getDeviceManager();
+                return await deviceManager.addRemoteDevice(remoteAddress);
+            }
+        } catch {
+            // Invalid format, fall through
+        }
     }
     
     // Priority 3: USB device (for mobile debugging)

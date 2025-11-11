@@ -49,7 +49,7 @@ export function registerResources(server: McpServer): void {
         new ResourceTemplate('frida://devices/{device_id}/processes', { list: undefined }),
         {
             name: 'Device Processes',
-            description: 'List processes on a specific Frida device. Use "local", "usb", or "remote" for automatic device selection, provide a specific device ID, or use a connection string (hostname:port or hostname).',
+            description: 'List processes on a specific Frida device. Use "default", "local", "usb", or "remote" for automatic device selection, provide a specific device ID, or use a connection string (hostname:port or hostname).',
             mimeType: 'application/json'
         },
         async (uri, { device_id }) => {
@@ -57,8 +57,8 @@ export function registerResources(server: McpServer): void {
             
             // Map special keywords to device selection
             let deviceId: string | undefined;
-            if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
-                deviceId = undefined; // Let getDevice handle auto-selection
+            if (deviceIdParam === 'default' || deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
+                deviceId = deviceIdParam; // Let getDevice handle keyword
             } else {
                 // Pass through - getDevice will handle connection strings
                 deviceId = deviceIdParam;
@@ -199,7 +199,7 @@ export function registerResources(server: McpServer): void {
         new ResourceTemplate('frida://devices/{device_id}/processes/by-name/{process_name}', { list: undefined }),
         {
             name: 'Process by Name',
-            description: 'Find a process by name (case-insensitive partial match) on a specific device. Supports connection strings (hostname:port or hostname).',
+            description: 'Find a process by name (case-insensitive partial match) on a specific device. Use "default" for configured remote device. Supports connection strings (hostname:port or hostname).',
             mimeType: 'application/json'
         },
         async (uri, { device_id, process_name }) => {
@@ -208,8 +208,8 @@ export function registerResources(server: McpServer): void {
             
             // Map special keywords to device selection
             let deviceId: string | undefined;
-            if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
-                deviceId = undefined;
+            if (deviceIdParam === 'default' || deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
+                deviceId = deviceIdParam;
             } else {
                 // Pass through - getDevice will handle connection strings
                 deviceId = deviceIdParam;
@@ -276,7 +276,7 @@ export function registerResources(server: McpServer): void {
         new ResourceTemplate('frida://devices/{device_id}/processes/{pid}/module', { list: undefined }),
         {
             name: 'Process Module Path',
-            description: 'Get main module information for a process (path, base address, size). Supports connection strings (hostname:port or hostname).',
+            description: 'Get main module information for a process (path, base address, size). Use "default" for configured remote device. Supports connection strings (hostname:port or hostname).',
             mimeType: 'application/json'
         },
         async (uri, { device_id, pid }) => {
@@ -301,8 +301,8 @@ export function registerResources(server: McpServer): void {
             
             // Map special keywords to device selection
             let deviceId: string | undefined;
-            if (deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
-                deviceId = undefined;
+            if (deviceIdParam === 'default' || deviceIdParam === 'local' || deviceIdParam === 'usb' || deviceIdParam === 'remote') {
+                deviceId = deviceIdParam;
             } else {
                 // Pass through - getDevice will handle connection strings
                 deviceId = deviceIdParam;
