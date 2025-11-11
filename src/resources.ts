@@ -43,6 +43,42 @@ export function registerResources(server: McpServer): void {
         }
     );
     
+    // Documentation resource (static)
+    server.registerResource(
+        'frida-documentation',
+        'frida://documentation',
+        {
+            name: 'Frida Tips & Documentation',
+            description: 'Non-obvious Frida JavaScript API features and best practices',
+            mimeType: 'text/markdown'
+        },
+        async () => {
+            const fs = await import('fs/promises');
+            const path = await import('path');
+            const docPath = path.join(process.cwd(), 'frida-tips.md');
+            
+            try {
+                const content = await fs.readFile(docPath, 'utf-8');
+                return {
+                    contents: [{
+                        uri: 'frida://documentation',
+                        text: content,
+                        mimeType: 'text/markdown'
+                    }]
+                };
+            } catch (error) {
+                const errorContent = `# Documentation Not Available\n\nError loading documentation: ${error instanceof Error ? error.message : String(error)}`;
+                return {
+                    contents: [{
+                        uri: 'frida://documentation',
+                        text: errorContent,
+                        mimeType: 'text/markdown'
+                    }]
+                };
+            }
+        }
+    );
+    
     // Device processes resource template
     server.registerResource(
         'device-processes',

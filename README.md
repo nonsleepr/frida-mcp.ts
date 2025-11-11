@@ -97,8 +97,8 @@ Add this to your project's `.roo/mcp.json`:
 | Tool | Description | Parameters |
 |------|-------------|------------|
 | `create_interactive_session` | Create an interactive session for dynamic instrumentation. Establishes a Frida session for injecting JavaScript, hooking functions, and monitoring the target process. The session persists until explicitly closed or the process terminates. | `process_id` (number)<br>`device_id` (optional: "default" or connection string) |
-| `execute_in_session` | Execute JavaScript code within an existing Frida session.<br><br>**Modes:**<br>• `keep_alive=false` (default): Script runs once, results in initial_logs<br>• `keep_alive=true`: Script persists for hooks, retrieve messages via `frida://sessions/{session_id}/messages` resource | `session_id` (string)<br>`javascript_code` (string)<br>`keep_alive` (optional boolean, default: false) |
-| `load_script_file` | Load and execute a Frida JavaScript file into an existing session. | `session_id` (string)<br>`script_path` (string)<br>`keep_alive` (optional boolean, default: true) |
+| `execute_in_session` | Execute JavaScript code within an existing Frida session. All scripts are persistent and continue running. Use `wait` parameter to capture initial output before returning. Messages available via `frida://sessions/{session_id}/messages` resource. | `session_id` (string)<br>`javascript_code` (string)<br>`wait` (optional number, default: 0 - seconds to wait for initial output) |
+| `load_script_file` | Load and execute a Frida JavaScript file into an existing session. All scripts are persistent and continue running. Use `wait` parameter to capture initial output before returning. Messages available via `frida://sessions/{session_id}/messages` resource. | `session_id` (string)<br>`script_path` (string)<br>`wait` (optional number, default: 0 - seconds to wait for initial output) |
 
 ### File Operations
 
@@ -116,6 +116,7 @@ Resources provide real-time, read-only access to Frida state via URI.
 |-----|-------------|
 | `frida://devices` | List all connected Frida devices |
 | `frida://sessions` | List all active Frida sessions and their statuses |
+| `frida://documentation` | Frida tips & non-obvious JavaScript API features |
 
 ### Resource Templates
 
