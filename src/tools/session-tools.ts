@@ -87,11 +87,11 @@ export function registerSessionTools(server: McpServer): void {
         'execute_in_session',
         {
             title: 'Execute in Session',
-            description: 'Execute JavaScript code within an existing Frida session. keep_alive=false (default): Script runs once, results in initial_logs. keep_alive=true: Script persists for hooks, retrieve messages via frida://sessions/{session_id}/messages resource.',
+            description: 'Execute JavaScript code within an existing Frida session. All scripts are persistent and continue running. Use wait parameter to capture initial output before returning. Messages available via frida://sessions/{session_id}/messages resource.',
             inputSchema: {
                 session_id: z.string().describe('Session ID from create_interactive_session'),
                 javascript_code: z.string().describe('JavaScript code to execute'),
-                keep_alive: z.boolean().optional().default(false).describe('If true, script persists; if false, runs once')
+                wait: z.number().optional().default(0).describe('Seconds to wait for initial output (0 = return immediately)')
             },
             outputSchema: {
                 status: z.string(),
@@ -99,15 +99,14 @@ export function registerSessionTools(server: McpServer): void {
                 initial_logs: z.array(z.string()).optional(),
                 error: z.string().optional(),
                 stack: z.string().optional(),
-                script_unloaded: z.boolean().optional(),
                 message: z.string().optional(),
                 info: z.string().optional()
             }
         },
-        async ({ session_id, javascript_code, keep_alive = false }: { 
-            session_id: string; 
-            javascript_code: string; 
-            keep_alive?: boolean;
+        async ({ session_id, javascript_code, wait = 0 }: {
+            session_id: string;
+            javascript_code: string;
+            wait?: number;
         }) => {
             const session = sessions.get(session_id);
             if (!session) {
@@ -126,28 +125,16 @@ export function registerSessionTools(server: McpServer): void {
                 // Create script directly without wrapper - preserves line numbers
                 const script = await session.createScript(javascript_code);
                 
-                // Capture messages during execution
+                // Capture initial logs if wait > 0
                 const logs: string[] = [];
-                let scriptError: { message: string; stack?: string; fileName?: string; lineNumber?: number; columnNumber?: number } | null = null;
-                
-                const handleMessage = (message: frida.Message, data: Buffer | null) => {
-                    if (message.type === 'send') {
-                        // Frida sends console.log output here automatically
-                        const payload = message.payload;
-                        logs.push(typeof payload === 'string' ? payload : JSON.stringify(payload));
-                    } else if (message.type === 'error') {
-                        // Error messages include correct line numbers
-                        scriptError = {
-                            message: message.description || 'Script error',
-                            stack: message.stack,
-                            fileName: message.fileName,
-                            lineNumber: message.lineNumber,
-                            columnNumber: message.columnNumber
-                        };
-                    }
-                };
                 
                 const handlePersistentMessage = (message: frida.Message, data: Buffer | null) => {
+                    // Capture initial logs during wait period
+                    if (wait > 0 && message.type === 'send') {
+                        const payload = message.payload;
+                        logs.push(typeof payload === 'string' ? payload : JSON.stringify(payload));
+                    }
+                    
                     // Handle binary data serialization
                     const messageData: ScriptMessage = {
                         type: message.type,
@@ -175,7 +162,7 @@ export function registerSessionTools(server: McpServer): void {
                         }
                     }
                     
-                    // Add message to queue
+                    // Add message to queue for retrieval
                     const messageQueue = scriptMessages.get(session_id);
                     if (messageQueue) {
                         messageQueue.push(messageData);
@@ -183,56 +170,31 @@ export function registerSessionTools(server: McpServer): void {
                     }
                 };
                 
-                if (keep_alive) {
-                    script.message.connect(handlePersistentMessage);
-                    const sessionScripts = scripts.get(session_id);
-                    if (sessionScripts) {
-                        sessionScripts.push(script);
-                    }
-                } else {
-                    script.message.connect(handleMessage);
+                // Always use persistent message handler
+                script.message.connect(handlePersistentMessage);
+                
+                // Store script in session
+                const sessionScripts = scripts.get(session_id);
+                if (sessionScripts) {
+                    sessionScripts.push(script);
                 }
                 
                 await script.load();
                 
-                // Give a short time for initial execution
-                if (!keep_alive) {
-                    await sleep(200);
+                // Wait for initial output if requested
+                if (wait > 0) {
+                    await sleep(wait * 1000);
                 }
                 
-                // Process results
-                let finalResult: any = {};
-                if (scriptError) {
-                    finalResult = {
-                        status: 'error',
-                        error: scriptError.message,
-                        stack: scriptError.stack,
-                        fileName: scriptError.fileName,
-                        lineNumber: scriptError.lineNumber,
-                        columnNumber: scriptError.columnNumber,
-                        logs
-                    };
-                } else if (keep_alive) {
-                    finalResult = {
-                        status: 'success',
-                        message: 'Script loaded persistently. Use frida://sessions/{session_id}/messages to retrieve messages.',
-                        logs
-                    };
-                } else {
-                    finalResult = {
-                        status: 'success',
-                        message: 'Script executed successfully.',
-                        logs
-                    };
-                }
-                
-                if (!keep_alive) {
-                    await script.unload();
-                    finalResult.script_unloaded = true;
-                } else {
-                    finalResult.script_unloaded = false;
-                    finalResult.info = 'Script is persistent. Messages will be queued.';
-                }
+                // Build response
+                const finalResult: any = {
+                    status: 'success',
+                    message: wait > 0
+                        ? `Script loaded. Waited ${wait}s for initial output. Script continues running - use frida://sessions/{session_id}/messages to retrieve messages.`
+                        : 'Script loaded and running persistently. Use frida://sessions/{session_id}/messages to retrieve messages.',
+                    logs,
+                    info: 'Script is persistent and will continue running until session ends.'
+                };
                 
                 return {
                     content: [{ type: 'text', text: JSON.stringify(finalResult, null, 2) }],
@@ -258,11 +220,11 @@ export function registerSessionTools(server: McpServer): void {
         'load_script_file',
         {
             title: 'Load Script File',
-            description: 'Load and execute a Frida JavaScript file into an existing session.',
+            description: 'Load and execute a Frida JavaScript file into an existing session. All scripts are persistent and continue running. Use wait parameter to capture initial output before returning. Messages available via frida://sessions/{session_id}/messages resource.',
             inputSchema: {
                 session_id: z.string().describe('Session ID from create_interactive_session'),
                 script_path: z.string().describe('Path to JavaScript file'),
-                keep_alive: z.boolean().optional().default(true).describe('If true, script persists; if false, runs once')
+                wait: z.number().optional().default(0).describe('Seconds to wait for initial output (0 = return immediately)')
             },
             outputSchema: {
                 status: z.string(),
@@ -270,10 +232,10 @@ export function registerSessionTools(server: McpServer): void {
                 error: z.string().optional()
             }
         },
-        async ({ session_id, script_path, keep_alive = true }: {
+        async ({ session_id, script_path, wait = 0 }: {
             session_id: string;
             script_path: string;
-            keep_alive?: boolean;
+            wait?: number;
         }) => {
             const session = sessions.get(session_id);
             if (!session) {
@@ -296,28 +258,16 @@ export function registerSessionTools(server: McpServer): void {
                 // Create script directly without wrapper - preserves line numbers
                 const script = await session.createScript(javascriptCode);
                 
-                // Capture messages during execution
+                // Capture initial logs if wait > 0
                 const logs: string[] = [];
-                let scriptError: { message: string; stack?: string; fileName?: string; lineNumber?: number; columnNumber?: number } | null = null;
-                
-                const handleMessage = (message: frida.Message, data: Buffer | null) => {
-                    if (message.type === 'send') {
-                        // Frida sends console.log output here automatically
-                        const payload = message.payload;
-                        logs.push(typeof payload === 'string' ? payload : JSON.stringify(payload));
-                    } else if (message.type === 'error') {
-                        // Error messages include correct line numbers
-                        scriptError = {
-                            message: message.description || 'Script error',
-                            stack: message.stack,
-                            fileName: message.fileName,
-                            lineNumber: message.lineNumber,
-                            columnNumber: message.columnNumber
-                        };
-                    }
-                };
                 
                 const handlePersistentMessage = (message: frida.Message, data: Buffer | null) => {
+                    // Capture initial logs during wait period
+                    if (wait > 0 && message.type === 'send') {
+                        const payload = message.payload;
+                        logs.push(typeof payload === 'string' ? payload : JSON.stringify(payload));
+                    }
+                    
                     // Handle binary data serialization
                     const messageData: ScriptMessage = {
                         type: message.type,
@@ -345,7 +295,7 @@ export function registerSessionTools(server: McpServer): void {
                         }
                     }
                     
-                    // Add message to queue
+                    // Add message to queue for retrieval
                     const messageQueue = scriptMessages.get(session_id);
                     if (messageQueue) {
                         messageQueue.push(messageData);
@@ -353,59 +303,32 @@ export function registerSessionTools(server: McpServer): void {
                     }
                 };
                 
-                if (keep_alive) {
-                    script.message.connect(handlePersistentMessage);
-                    const sessionScripts = scripts.get(session_id);
-                    if (sessionScripts) {
-                        sessionScripts.push(script);
-                    }
-                } else {
-                    script.message.connect(handleMessage);
+                // Always use persistent message handler
+                script.message.connect(handlePersistentMessage);
+                
+                // Store script in session
+                const sessionScripts = scripts.get(session_id);
+                if (sessionScripts) {
+                    sessionScripts.push(script);
                 }
                 
                 await script.load();
                 
-                // Give a short time for initial execution
-                if (!keep_alive) {
-                    await sleep(200);
+                // Wait for initial output if requested
+                if (wait > 0) {
+                    await sleep(wait * 1000);
                 }
                 
-                // Process results
-                let finalResult: any = {};
-                if (scriptError !== null) {
-                    finalResult = {
-                        status: 'error',
-                        error: scriptError.message,
-                        stack: scriptError.stack,
-                        fileName: scriptError.fileName,
-                        lineNumber: scriptError.lineNumber,
-                        columnNumber: scriptError.columnNumber,
-                        script_file: script_path,
-                        logs
-                    };
-                } else if (keep_alive) {
-                    finalResult = {
-                        status: 'success',
-                        message: 'Script file loaded persistently. Use frida://sessions/{session_id}/messages to retrieve messages.',
-                        script_file: script_path,
-                        logs
-                    };
-                } else {
-                    finalResult = {
-                        status: 'success',
-                        message: 'Script file executed successfully.',
-                        script_file: script_path,
-                        logs
-                    };
-                }
-                
-                if (!keep_alive) {
-                    await script.unload();
-                    finalResult.script_unloaded = true;
-                } else {
-                    finalResult.script_unloaded = false;
-                    finalResult.info = 'Script is persistent. Messages will be queued.';
-                }
+                // Build response
+                const finalResult: any = {
+                    status: 'success',
+                    message: wait > 0
+                        ? `Script file loaded. Waited ${wait}s for initial output. Script continues running - use frida://sessions/{session_id}/messages to retrieve messages.`
+                        : 'Script file loaded and running persistently. Use frida://sessions/{session_id}/messages to retrieve messages.',
+                    script_file: script_path,
+                    logs,
+                    info: 'Script is persistent and will continue running until session ends.'
+                };
                 
                 return {
                     content: [{ type: 'text', text: JSON.stringify(finalResult, null, 2) }],
