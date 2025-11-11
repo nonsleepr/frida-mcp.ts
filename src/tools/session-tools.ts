@@ -13,6 +13,51 @@ import type { ScriptMessage } from '../types.js';
 import { CONSOLE_INTERCEPTOR } from '../scripts.js';
 
 /**
+ * Process captured logs to normalize console messages and detect errors
+ */
+function processLogs(logs: any[]): { processedLogs: any[], firstError: any | null } {
+    const processedLogs: any[] = [];
+    let firstError: any | null = null;
+    
+    for (const log of logs) {
+        // Handle console.* messages - flatten the structure
+        if (log.type === 'send' && log.payload && typeof log.payload === 'object' &&
+            typeof log.payload.type === 'string' && log.payload.type.startsWith('console.')) {
+            // Extract console type and message
+            const consoleType = log.payload.type;
+            const message = log.payload.message;
+            
+            processedLogs.push({
+                type: consoleType,
+                message: message,
+                data: log.data
+            });
+        }
+        // Handle error messages
+        else if (log.type === 'error') {
+            // Capture first error for top-level error reporting
+            if (!firstError && log.payload) {
+                firstError = {
+                    description: log.payload.description,
+                    stack: log.payload.stack,
+                    fileName: log.payload.fileName,
+                    lineNumber: log.payload.lineNumber,
+                    columnNumber: log.payload.columnNumber
+                };
+            }
+            // Keep error in logs as-is
+            processedLogs.push(log);
+        }
+        // Handle regular send messages and other types
+        else {
+            processedLogs.push(log);
+        }
+    }
+    
+    return { processedLogs, firstError };
+}
+
+/**
  * Register session management tools with the MCP server
  */
 export function registerSessionTools(server: McpServer): void {
@@ -123,10 +168,16 @@ export function registerSessionTools(server: McpServer): void {
             }
             
             try {
-                // Prepend console interceptor to preserve console.log output
-                // The interceptor adds 2 lines (interceptor + sourceURL comment)
-                const LINE_OFFSET = 2;
-                const wrappedCode = `${CONSOLE_INTERCEPTOR}\n//# sourceURL=user-script.js\n${javascript_code}`;
+                // Prepend console interceptor to capture console.* output
+                // The interceptor adds 1 line, so line numbers are offset by 1
+                const LINE_OFFSET = 1;
+                
+                // Generate script name based on number of scripts in session
+                const existingScripts = scripts.get(session_id) || [];
+                const scriptNumber = existingScripts.length + 1;
+                const scriptName = `script${scriptNumber}`;
+                
+                const wrappedCode = `${CONSOLE_INTERCEPTOR}\n${javascript_code}\n//# sourceURL=/${scriptName}.js`;
                 const script = await session.createScript(wrappedCode);
                 
                 // Capture initial logs - always capture, not just when wait > 0
@@ -134,12 +185,6 @@ export function registerSessionTools(server: McpServer): void {
                 let initialCollectionDone = false;
                 
                 const handlePersistentMessage = (message: frida.Message, data: Buffer | null) => {
-                    // Capture logs before initial collection is done
-                    if (!initialCollectionDone && message.type === 'send') {
-                        const payload = message.payload;
-                        logs.push(payload);
-                    }
-                    
                     // Handle binary data serialization
                     const messageData: ScriptMessage = {
                         type: message.type,
@@ -166,6 +211,15 @@ export function registerSessionTools(server: McpServer): void {
                         } catch (error) {
                             logger.error(`Failed to encode binary data: ${error}`);
                         }
+                    }
+                    
+                    // Capture ALL message types in initial logs before collection is done
+                    if (!initialCollectionDone) {
+                        logs.push({
+                            type: messageData.type,
+                            payload: messageData.payload,
+                            data: messageData.data
+                        });
                     }
                     
                     // Add message to queue for retrieval
@@ -198,15 +252,28 @@ export function registerSessionTools(server: McpServer): void {
                 // Mark initial collection as done
                 initialCollectionDone = true;
                 
+                // Process logs to normalize console messages and detect errors
+                const { processedLogs, firstError } = processLogs(logs);
+                
                 // Build response
                 const finalResult: any = {
-                    status: 'success',
+                    status: firstError ? 'error' : 'success',
+                    script_name: scriptName,
                     message: wait > 0
-                        ? `Script loaded. Waited ${wait}s for initial output. Script continues running - use frida://sessions/{session_id}/messages to retrieve messages.`
-                        : 'Script loaded and running persistently. Use frida://sessions/{session_id}/messages to retrieve messages.',
-                    logs,
+                        ? `Script loaded. Waited ${wait}s for initial output. Script continues running - use frida://sessions/${session_id}/messages to retrieve messages.`
+                        : `Script loaded and running persistently. Use frida://sessions/${session_id}/messages to retrieve messages.`,
+                    logs: processedLogs,
                     info: 'Script is persistent and will continue running until session ends.'
                 };
+                
+                // Add error details at top level if error occurred
+                if (firstError) {
+                    finalResult.error = firstError.description;
+                    finalResult.stack = firstError.stack;
+                    finalResult.fileName = firstError.fileName;
+                    finalResult.lineNumber = firstError.lineNumber;
+                    finalResult.columnNumber = firstError.columnNumber;
+                }
                 
                 return {
                     content: [{ type: 'text', text: JSON.stringify(finalResult, null, 2) }],
@@ -267,10 +334,14 @@ export function registerSessionTools(server: McpServer): void {
                 const fs = await import('fs/promises');
                 const javascriptCode = await fs.readFile(script_path, 'utf-8');
                 
-                // Prepend console interceptor to preserve console.log output
-                // The interceptor adds 2 lines (interceptor + sourceURL comment)
-                const LINE_OFFSET = 2;
-                const wrappedCode = `${CONSOLE_INTERCEPTOR}\n//# sourceURL=${script_path}\n${javascriptCode}`;
+                // Prepend console interceptor to capture console.* output
+                // The interceptor adds 1 line, so line numbers are offset by 1
+                const LINE_OFFSET = 1;
+                
+                // Use the script file path as the script name
+                const scriptName = script_path;
+                
+                const wrappedCode = `${CONSOLE_INTERCEPTOR}\n${javascriptCode}\n//# sourceURL=${scriptName}`;
                 const script = await session.createScript(wrappedCode);
                 
                 // Capture initial logs - always capture, not just when wait > 0
@@ -278,12 +349,6 @@ export function registerSessionTools(server: McpServer): void {
                 let initialCollectionDone = false;
                 
                 const handlePersistentMessage = (message: frida.Message, data: Buffer | null) => {
-                    // Capture logs before initial collection is done
-                    if (!initialCollectionDone && message.type === 'send') {
-                        const payload = message.payload;
-                        logs.push(payload);
-                    }
-                    
                     // Handle binary data serialization
                     const messageData: ScriptMessage = {
                         type: message.type,
@@ -310,6 +375,15 @@ export function registerSessionTools(server: McpServer): void {
                         } catch (error) {
                             logger.error(`Failed to encode binary data: ${error}`);
                         }
+                    }
+                    
+                    // Capture ALL message types in initial logs before collection is done
+                    if (!initialCollectionDone) {
+                        logs.push({
+                            type: messageData.type,
+                            payload: messageData.payload,
+                            data: messageData.data
+                        });
                     }
                     
                     // Add message to queue for retrieval
@@ -342,16 +416,29 @@ export function registerSessionTools(server: McpServer): void {
                 // Mark initial collection as done
                 initialCollectionDone = true;
                 
+                // Process logs to normalize console messages and detect errors
+                const { processedLogs, firstError } = processLogs(logs);
+                
                 // Build response
                 const finalResult: any = {
-                    status: 'success',
+                    status: firstError ? 'error' : 'success',
+                    script_name: scriptName,
                     message: wait > 0
-                        ? `Script file loaded. Waited ${wait}s for initial output. Script continues running - use frida://sessions/{session_id}/messages to retrieve messages.`
-                        : 'Script file loaded and running persistently. Use frida://sessions/{session_id}/messages to retrieve messages.',
+                        ? `Script file loaded. Waited ${wait}s for initial output. Script continues running - use frida://sessions/${session_id}/messages to retrieve messages.`
+                        : `Script file loaded and running persistently. Use frida://sessions/${session_id}/messages to retrieve messages.`,
                     script_file: script_path,
-                    logs,
+                    logs: processedLogs,
                     info: 'Script is persistent and will continue running until session ends.'
                 };
+                
+                // Add error details at top level if error occurred
+                if (firstError) {
+                    finalResult.error = firstError.description;
+                    finalResult.stack = firstError.stack;
+                    finalResult.fileName = firstError.fileName;
+                    finalResult.lineNumber = firstError.lineNumber;
+                    finalResult.columnNumber = firstError.columnNumber;
+                }
                 
                 return {
                     content: [{ type: 'text', text: JSON.stringify(finalResult, null, 2) }],
