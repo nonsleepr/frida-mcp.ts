@@ -98,7 +98,9 @@ export function registerSessionTools(server: McpServer): void {
                 // Setup session lifecycle management - auto-cleanup on detach
                 session.detached.connect((reason, crash) => {
                     logger.info(`Session ${sessionId} detached: ${reason}${crash ? ' (crashed)' : ''}`);
-                    cleanupSession(sessionId);
+                    cleanupSession(sessionId).catch(error => {
+                        logger.error(`Error during session cleanup: ${error}`);
+                    });
                 });
                 
                 logger.info(`Session ${sessionId} created successfully`);

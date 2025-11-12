@@ -143,17 +143,18 @@ export async function executeScriptAndWait(
 
 /**
  * Clean up a detached or invalid session.
- * 
+ *
  * @param sessionId - Session ID to clean up
  */
-export function cleanupSession(sessionId: string): void {
+export async function cleanupSession(sessionId: string): Promise<void> {
     // Detach session if exists
     const session = sessions.get(sessionId);
     if (session) {
         try {
-            session.detach();
+            await session.detach();
         } catch (error) {
-            // Ignore errors during cleanup
+            // Ignore errors during cleanup - session may already be detached
+            logger.debug(`Session detach error (expected if already detached): ${error}`);
         }
         sessions.delete(sessionId);
     }
@@ -163,9 +164,10 @@ export function cleanupSession(sessionId: string): void {
     if (sessionScripts) {
         for (const script of sessionScripts) {
             try {
-                script.unload();
+                await script.unload();
             } catch (error) {
-                // Ignore errors during cleanup
+                // Ignore errors during cleanup - script may already be destroyed
+                logger.debug(`Script unload error (expected if already destroyed): ${error}`);
             }
         }
         scripts.delete(sessionId);

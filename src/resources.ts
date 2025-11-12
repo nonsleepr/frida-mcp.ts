@@ -453,7 +453,7 @@ export function registerResources(server: McpServer): void {
                     logger.debug(`Session found, is_detached=${isDetached}`);
                     if (isDetached) {
                         logger.warning(`Session ${sessionIdStr} is detached, cleaning up`);
-                        cleanupSession(sessionIdStr);
+                        await cleanupSession(sessionIdStr);
                         
                         const result = {
                             status: 'error',
@@ -557,7 +557,7 @@ export function registerResources(server: McpServer): void {
                     logger.debug(`Session found, is_detached=${isDetached}`);
                     if (isDetached) {
                         logger.warning(`Session ${sessionIdStr} is detached, cleaning up`);
-                        cleanupSession(sessionIdStr);
+                        await cleanupSession(sessionIdStr);
                         
                         const result = {
                             status: 'error',
